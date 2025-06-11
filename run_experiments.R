@@ -2,9 +2,21 @@
 install.packages("readxl", dependencies = TRUE)
 install.packages("caret")
 
+# Install additional packages if not already installed
+install.packages("randomForest", dependencies = TRUE)
+install.packages("gbm", dependencies = TRUE)
+install.packages("kernlab", dependencies = TRUE)
+install.packages("e1071", dependencies = TRUE)
+
 # Load required libraries
 library(readxl)
 library(caret)
+
+# Load additional libraries
+library(randomForest)
+library(gbm)
+library(kernlab)
+library(e1071)
 
 # Load clinical data
 clinica_data <- read_excel("data/ClinicaGliomasMayo2025.xlsx")
@@ -103,11 +115,11 @@ par(mfrow = c(1, 1))
 features <- c(
   "Chr_7_gain_Chr_10_loss", "TERT_promoter_status", "EGFR_CNV",
   "CDKN2A_CNV", "CDKN2B_CNV", "MGMT_promoter_status", "Category_Table_S1",
-  "days_to_death.demographic", "gender_demographic", "race.demographic", "tumor_descriptor_samples"
+  "Age_years_at_diagnosis", "gender_demographic", "race.demographic", "tumor_descriptor_samples"
 )
 
 # Prepare data (remove rows with missing values in relevant columns)
-data_model <- clinica_data[, c("Age_years_at_diagnosis", features)]
+data_model <- clinica_data[, c("days_to_death.demographic", features)]
 data_model <- na.omit(data_model)
 
 # Convert categorical variables to factors
@@ -118,59 +130,62 @@ cat_vars <- c(
 )
 data_model[cat_vars] <- lapply(data_model[cat_vars], as.factor)
 
-
-# Set up leave-one-out cross-validation
-ctrl <- trainControl(method = "LOOCV")
-
-# Train a linear regression model
-set.seed(123)
-model <- train(
-  Age_years_at_diagnosis ~ .,
-  data = data_model,
-  method = "lm",
-  trControl = ctrl
-)
-
-# Print model results
-print(model)
-
-# Show cross-validated RMSE
-cat("LOOCV RMSE:", model$results$RMSE, "\n")
+# Define methods to try
+methods_to_try <- c("lm", "rf", "knn", "svmRadial", "gbm")
 
 # Create results directory if it doesn't exist
 if (!dir.exists("results")) {
   dir.create("results")
 }
 
-# Get predictions from the model
-predictions <- predict(model, newdata = data_model)
+# Set up leave-one-out cross-validation
+ctrl <- trainControl(method = "LOOCV")
 
-# Save the scatter plot as PDF
-pdf("results/predicted_vs_actual_age.pdf")
-plot(data_model$Age_years_at_diagnosis, predictions,
-     xlab = "Actual Age at Diagnosis",
-     ylab = "Predicted Age at Diagnosis",
-     main = "Predicted vs Actual Age at Diagnosis",
-     pch = 19, col = "blue")
+# Store results
+model_results <- list()
 
-# Add a perfect prediction line (y = x)
-abline(0, 1, col = "red", lty = 2)
+for (m in methods_to_try) {
+  set.seed(123)
+  model <- train(
+    days_to_death.demographic ~ .,
+    data = data_model,
+    method = m,
+    trControl = ctrl
+  )
+  predictions <- predict(model, newdata = data_model)
+  correlation <- cor(data_model$days_to_death.demographic, predictions)
+  rmse <- sqrt(mean((data_model$days_to_death.demographic - predictions)^2))
+  model_results[[m]] <- list(model = model, predictions = predictions, correlation = correlation, rmse = rmse)
 
-# Add correlation coefficient to the plot
-correlation <- cor(data_model$Age_years_at_diagnosis, predictions)
-text(min(data_model$Age_years_at_diagnosis), max(predictions),
-     paste("Correlation:", round(correlation, 3)),
-     pos = 4)
-dev.off()
+  # Save scatter plot
+  pdf(paste0("results/predicted_vs_actual_survival_", m, ".pdf"))
+  # Set margins to ensure text is visible
+  par(mar = c(5, 4, 4, 6))
+  plot(data_model$days_to_death.demographic, predictions,
+       xlab = "Actual Days to Death",
+       ylab = "Predicted Days to Death",
+       main = paste("Predicted vs Actual Survival (", m, ")"),
+       pch = 19, col = "blue")
+  abline(0, 1, col = "red", lty = 2)
+  
+  # Calculate text position to ensure visibility
+  x_pos <- min(data_model$days_to_death.demographic)
+  y_pos <- max(predictions)
+  # Add text with a white background for better visibility
+  text(x_pos, y_pos,
+       paste("Correlation:", round(correlation, 3), "\nRMSE:", round(rmse, 2), "days"),
+       pos = 4, offset = 0.5,
+       bg = "white",  # Add white background
+       cex = 0.9)     # Slightly smaller text
+  dev.off()
+}
 
-# Also display the plot in R
-plot(data_model$Age_years_at_diagnosis, predictions,
-     xlab = "Actual Age at Diagnosis",
-     ylab = "Predicted Age at Diagnosis",
-     main = "Predicted vs Actual Age at Diagnosis",
-     pch = 19, col = "blue")
-abline(0, 1, col = "red", lty = 2)
-text(min(data_model$Age_years_at_diagnosis), max(predictions),
-     paste("Correlation:", round(correlation, 3)),
-     pos = 4)
+# Print summary of results
+cat("\nModel Performance Summary:\n")
+cat("========================\n")
+for (m in methods_to_try) {
+  cat("\nMethod:", m, "\n")
+  cat("Correlation:", round(model_results[[m]]$correlation, 3), "\n")
+  cat("RMSE:", round(model_results[[m]]$rmse, 2), "days\n")
+}
 
