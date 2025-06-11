@@ -189,3 +189,5 @@ for (m in methods_to_try) {
   cat("RMSE:", round(model_results[[m]]$rmse, 2), "days\n")
 }
 
+# Load xCell_gene_tpm
+xcell_data <- read_excel("data/xCell_gene_tpm_Mayo2025.xlsx")
