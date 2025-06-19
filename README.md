@@ -81,6 +81,55 @@ The script now includes comprehensive variable importance analysis for tree-base
 - Provides average importance scores for robust feature selection
 - Enables biological interpretation of cell type contributions to survival prediction
 
+## Scale Comparison Analysis
+
+The script now addresses scale mismatch issues and provides multiple approaches:
+
+### **Problem Solved**
+- **Original Issue**: Models trained on log-transformed data showed good correlation but poor scale matching when back-transformed
+- **Solution**: Multiple evaluation approaches to compare performance, including bias correction
+
+### **Approaches Implemented**
+
+#### **1. Log-Transformed Approach (Original)**
+- Trains models on log-transformed survival data
+- Evaluates performance in both log-scale and original scale
+- Provides two sets of plots for each model
+
+#### **2. Original Scale Approach (Alternative)**
+- Trains models directly on original survival data (no log transformation)
+- Compares performance with log-transformed approach
+- Helps identify which approach works better for your data
+
+#### **3. Bias Correction (New)**
+- **Problem**: When exponentiating log-transformed predictions, E[exp(X)] ≠ exp(E[X])
+- **Solution**: Applies bias correction using residual variance: `exp(pred + var/2)`
+- **Result**: Much better scale matching in original units
+
+### **Outputs Generated**
+1. **Dual-Scale Plots**: Each model now generates two plots:
+   - `predicted_vs_actual_log_scale_[method].pdf` - Log-scale evaluation
+   - `predicted_vs_actual_original_scale_[method].pdf` - Original scale evaluation with bias correction
+
+2. **Scale Comparison**: 
+   - `scale_comparison_rf.pdf` - Side-by-side comparison showing bias correction effect
+
+3. **Enhanced Metrics**: Performance reported in both scales:
+   - Log-scale: Correlation and RMSE in log(days)
+   - Original scale: Correlation and RMSE in actual days (both raw and bias-corrected)
+
+### **Bias Correction Details**
+The bias correction addresses the fundamental issue with log-transformed regression:
+- **Raw back-transformation**: `exp(prediction)` - often underestimates true values
+- **Bias-corrected**: `exp(prediction + residual_variance/2)` - accounts for the fact that E[exp(X)] = exp(μ + σ²/2) for log-normal distributions
+
+### **Benefits**
+- **Accurate Evaluation**: See how models perform in both transformed and original scales
+- **Better Interpretation**: Understand if log transformation helps or hurts performance
+- **Robust Comparison**: Compare different modeling approaches systematically
+- **Biological Relevance**: Original scale metrics are more interpretable for clinical applications
+- **Fixed Scale Mismatch**: Bias correction provides much better predictions in original units
+
 ## Usage
 
 To run the analysis:
