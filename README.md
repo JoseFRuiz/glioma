@@ -1,6 +1,118 @@
 # Glioma Survival Prediction Analysis
 
-This project analyzes clinical and molecular data from glioma patients to predict survival time using various machine learning methods.
+This project analyzes glioma survival prediction using xCell gene expression data and multiple machine learning models.
+
+## Project Structure
+
+```
+glioma/
+├── data/
+│   ├── ClinicaGliomasMayo2025.xlsx          # Clinical data
+│   └── xCell_gene_tpm_Mayo2025.xlsx         # Gene expression data
+├── results/                                  # Generated plots and results
+├── run_experiments.R                         # Main analysis script
+├── draft.r                                   # Draft analysis
+└── README.md                                 # This file
+```
+
+## Code Organization Improvements
+
+The `run_experiments.R` script has been reorganized with the following improvements:
+
+### 1. **Modular Structure**
+- **Configuration Section**: Centralized constants and settings
+- **Data Loading Functions**: Modular functions for loading and preprocessing data
+- **Model Training Functions**: Reusable functions for model training and evaluation
+- **Variable Importance Analysis**: Functions to analyze feature relevance
+- **Main Pipeline**: Orchestrates the entire analysis workflow
+
+### 2. **Eliminated Redundancy**
+- Removed unused clinical features analysis code
+- Consolidated duplicate method definitions
+- Unified variable naming conventions
+- Removed redundant data preparation steps
+
+### 3. **Key Functions**
+
+#### Data Processing
+- `load_clinical_data()`: Loads clinical data from Excel
+- `load_xcell_data()`: Loads and reshapes xCell gene expression data
+- `prepare_xcell_dataset()`: Merges and prepares final dataset
+
+#### Model Training
+- `setup_train_control()`: Configures training parameters
+- `train_and_evaluate_model()`: Trains and evaluates individual models
+- `create_scatter_plot()`: Generates performance visualization
+- `print_results_summary()`: Displays model performance summary
+
+#### Variable Importance Analysis
+- `analyze_variable_importance()`: Extracts and visualizes feature importance for tree-based models (RF, GBM)
+- `create_importance_comparison()`: Compares variable importance across different models
+
+#### Main Pipeline
+- `main_analysis()`: Orchestrates the complete analysis workflow
+
+### 4. **Benefits of Reorganization**
+- **Maintainability**: Functions are self-contained and reusable
+- **Readability**: Clear separation of concerns with logical sections
+- **Extensibility**: Easy to add new models or modify existing ones
+- **Debugging**: Isolated functions make troubleshooting easier
+- **Documentation**: Each function has clear purpose and parameters
+
+## Variable Importance Analysis
+
+The script now includes comprehensive variable importance analysis for tree-based models:
+
+### **Supported Models**
+- **Random Forest (rf)**: Uses `varImp()` from the `randomForest` package
+- **Gradient Boosting (gbm)**: Uses `varImp()` from the `gbm` package
+
+### **Outputs Generated**
+1. **Individual Model Plots**: `variable_importance_rf.pdf` and `variable_importance_gbm.pdf`
+2. **Comparison Analysis**: 
+   - `variable_importance_comparison.pdf` - Visual comparison of top 30 variables
+   - `variable_importance_comparison.csv` - Complete importance scores for all variables
+   - `top_50_important_variables.csv` - Top 50 most important variables
+3. **Console Output**: Top 20 most important variables for each model
+
+### **Key Insights**
+- Identifies which xCell features (cell types) are most predictive of survival
+- Compares importance rankings across different tree-based models
+- Provides average importance scores for robust feature selection
+- Enables biological interpretation of cell type contributions to survival prediction
+
+## Usage
+
+To run the analysis:
+
+```r
+source("run_experiments.R")
+```
+
+The script will:
+1. Load clinical and gene expression data
+2. Prepare the dataset for modeling
+3. Train multiple machine learning models (lm, rf, knn, svmRadial, gbm)
+4. Generate performance plots in the `results/` directory
+5. Print a summary of model performance
+
+## Dependencies
+
+Required R packages:
+- `readxl`: For reading Excel files
+- `caret`: For machine learning workflows
+- `randomForest`: For random forest models
+- `gbm`: For gradient boosting models
+- `kernlab`: For SVM models
+- `e1071`: For additional ML utilities
+- `dplyr`: For data manipulation
+
+## Results
+
+The analysis generates:
+- Performance plots for each model in `results/`
+- Console output with correlation and RMSE metrics
+- Log-transformed survival predictions using xCell features
 
 ## Project Overview
 
