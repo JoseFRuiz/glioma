@@ -1,12 +1,12 @@
 # Install readxl package if not already installed
-install.packages("readxl", dependencies = TRUE)
-install.packages("caret")
+# install.packages("readxl", dependencies = TRUE)
+# install.packages("caret")
 
-# Install additional packages if not already installed
-install.packages("randomForest", dependencies = TRUE)
-install.packages("gbm", dependencies = TRUE)
-install.packages("kernlab", dependencies = TRUE)
-install.packages("e1071", dependencies = TRUE)
+# # Install additional packages if not already installed
+# install.packages("randomForest", dependencies = TRUE)
+# install.packages("gbm", dependencies = TRUE)
+# install.packages("kernlab", dependencies = TRUE)
+# install.packages("e1071", dependencies = TRUE)
 
 # Load required libraries
 library(readxl)
@@ -191,3 +191,92 @@ for (m in methods_to_try) {
 
 # Load xCell_gene_tpm
 xcell_data <- read_excel("data/xCell_gene_tpm_Mayo2025.xlsx")
+
+# Reshape xcell_data: make TCGACode a column and CellType as column names
+xcell_t <- as.data.frame(t(xcell_data[,-1]))
+CellTypeNames <- xcell_data$CellType
+colnames(xcell_t) <- CellTypeNames
+xcell_t$TCGACode <- colnames(xcell_data)[-1]
+xcell_t <- xcell_t %>% dplyr::relocate(TCGACode)
+
+# Merge with clinica_data
+# merged_data <- dplyr::left_join(clinica_data, xcell_t, by = "TCGACode")
+merged_data <- dplyr::left_join(clinica_data[,c("TCGACode","days_to_death.demographic")], xcell_t, by = "TCGACode")
+
+
+# merged_data now contains all clinical and xCell features with CellType as columns
+
+# Prepare data: use only CellTypeNames as predictors
+xcell_features <- as.character(CellTypeNames)
+data_xcell <- merged_data[, c("days_to_death.demographic", xcell_features)]
+data_xcell <- na.omit(data_xcell)  # Remove rows with missing values
+
+# Create log-transformed target variable
+data_xcell$log_days_to_death <- log(data_xcell$days_to_death.demographic)
+
+# Set up bootstrapping with 70/30 split and 10 repetitions
+ctrl <- trainControl(
+  method = "boot",
+  number = 1,  # 10 repetitions
+  p = 0.7,      # 70% for training
+  savePredictions = TRUE,
+  returnResamp = "all"
+)
+
+# Train and evaluate models using only xCell features
+methods_xcell <- c("lm", "rf", "knn", "svmRadial", "gbm")
+xcell_model_results <- list()
+
+for (m in methods_xcell) {
+  set.seed(123)
+  model_xcell <- train(
+    log_days_to_death ~ . - days_to_death.demographic,  # Exclude original target variable
+    data = data_xcell,
+    method = m,
+    trControl = ctrl
+  )
+  
+  # Get predictions for the test set
+  # For bootstrapping, we need to identify the test set indices
+  train_indices <- model_xcell$control$index[[1]]
+  test_indices <- setdiff(1:nrow(data_xcell), train_indices)
+  
+  # Get predictions for test set
+  test_predictions <- predict(model_xcell, newdata = data_xcell[test_indices,])
+  test_actual <- data_xcell$log_days_to_death[test_indices]
+  
+  # Calculate performance metrics
+  correlation <- cor(test_actual, test_predictions)
+  rmse <- sqrt(mean((test_actual - test_predictions)^2))
+  
+  xcell_model_results[[m]] <- list(
+    model = model_xcell, 
+    predictions = test_predictions, 
+    actual = test_actual,
+    correlation = correlation, 
+    rmse = rmse
+  )
+
+  # Save scatter plot
+  pdf(paste0("results/predicted_vs_actual_xcell_log_", m, ".pdf"))
+  par(mar = c(5, 4, 4, 6))
+  plot(test_actual, test_predictions,
+       xlab = "Actual Log(Days to Death)",
+       ylab = "Predicted Log(Days to Death)",
+       main = paste("Predicted vs Actual (log-transformed, xCell features, ", m, ")"),
+       pch = 19, col = "blue")
+  abline(0, 1, col = "red", lty = 2)
+  text(min(test_actual), max(test_predictions),
+       paste("Correlation:", round(correlation, 3), "\nRMSE:", round(rmse, 2), "log(days)"),
+       pos = 4, offset = 0.5, bg = "white", cex = 0.9)
+  dev.off()
+}
+
+# Print summary of results for xCell models
+cat("\nModel Performance Summary (xCell features, log-transformed):\n")
+cat("========================================================\n")
+for (m in methods_xcell) {
+  cat("\nMethod:", m, "\n")
+  cat("Correlation:", round(xcell_model_results[[m]]$correlation, 3), "\n")
+  cat("RMSE:", round(xcell_model_results[[m]]$rmse, 2), "log(days)\n")
+}
