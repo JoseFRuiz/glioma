@@ -93,8 +93,26 @@ train_rf_model <- function(data, ctrl) {
   test_indices <- setdiff(1:nrow(data), train_indices)
   
   # Get predictions for test set
+  # alpha <- 1.8
+  # beta <- -280
+  # test_predictions <- alpha*predict(model, newdata = data[test_indices,])+beta
+  # test_actual <- data$days_to_death.demographic[test_indices]
+  # Predict on training data
+  train_predictions <- predict(model, newdata = data[train_indices,])
+  train_actual <- data$days_to_death.demographic[train_indices]
+
+  # Fit linear model: actual = alpha * prediction + beta
+  calib_lm <- lm(train_actual ~ train_predictions)
+
+  # Extract coefficients
+  alpha <- calib_lm$coefficients["train_predictions"]
+  beta <- calib_lm$coefficients["(Intercept)"]
+
+  # Apply calibration to test predictions
   test_predictions <- predict(model, newdata = data[test_indices,])
+  test_predictions <- alpha * test_predictions + beta
   test_actual <- data$days_to_death.demographic[test_indices]
+
   
   # Calculate performance metrics
   correlation <- cor(test_actual, test_predictions)
@@ -150,38 +168,73 @@ analyze_variable_importance <- function(model, output_dir = "results") {
   # Sort by importance (descending)
   imp_df <- imp_df[order(-imp_df$Importance), ]
   
-  # Create variable importance plot
-  pdf(paste0(output_dir, "/rf_variable_importance.pdf"), 
-      width = 12, height = max(8, nrow(imp_df) * 0.3))
+  # Separate positive and negative importance variables
+  positive_imp <- imp_df[imp_df$Importance > 0, ]
+  negative_imp <- imp_df[imp_df$Importance <= 0, ]
   
-  par(mar = c(5, 12, 4, 2))
-  barplot(imp_df$Importance, 
-          names.arg = imp_df$Variable,
-          horiz = TRUE,
-          las = 2,
-          col = "steelblue",
-          main = "Random Forest Variable Importance",
-          xlab = "Importance Score",
-          cex.names = 0.8)
+  # Print summary of importance distribution
+  cat("\nVariable Importance Summary:\n")
+  cat("============================\n")
+  cat("Total variables:", nrow(imp_df), "\n")
+  cat("Positive importance variables:", nrow(positive_imp), "\n")
+  cat("Negative importance variables:", nrow(negative_imp), "\n")
+  cat("Mean importance:", round(mean(imp_df$Importance), 3), "\n")
+  cat("Median importance:", round(median(imp_df$Importance), 3), "\n")
   
-  dev.off()
-  
-  # Print top 20 most important variables
-  cat("\nTop 20 Most Important Variables (Random Forest):\n")
-  cat("================================================\n")
-  top_20 <- head(imp_df, 20)
-  for (i in 1:nrow(top_20)) {
-    cat(sprintf("%2d. %-30s: %8.3f\n", i, top_20$Variable[i], top_20$Importance[i]))
+  # Create variable importance plot (only positive importance)
+  if (nrow(positive_imp) > 0) {
+    pdf(paste0(output_dir, "/rf_variable_importance.pdf"), 
+        width = 12, height = max(8, nrow(positive_imp) * 0.3))
+    
+    par(mar = c(5, 12, 4, 2))
+    barplot(positive_imp$Importance, 
+            names.arg = positive_imp$Variable,
+            horiz = TRUE,
+            las = 2,
+            col = "steelblue",
+            main = "Random Forest Variable Importance (Positive Only)",
+            xlab = "Importance Score",
+            cex.names = 0.8)
+    
+    dev.off()
   }
   
-  # Save importance data to CSV
+  # Print top 20 most important variables (positive only)
+  cat("\nTop 20 Most Important Variables (Positive Importance Only):\n")
+  cat("============================================================\n")
+  top_20_positive <- head(positive_imp, 20)
+  for (i in 1:nrow(top_20_positive)) {
+    cat(sprintf("%2d. %-30s: %8.3f\n", i, top_20_positive$Variable[i], top_20_positive$Importance[i]))
+  }
+  
+  # Print worst 10 variables (most negative)
+  if (nrow(negative_imp) > 0) {
+    cat("\nWorst 10 Variables (Negative Importance):\n")
+    cat("=========================================\n")
+    worst_10 <- head(negative_imp[order(negative_imp$Importance), ], 10)
+    for (i in 1:nrow(worst_10)) {
+      cat(sprintf("%2d. %-30s: %8.3f\n", i, worst_10$Variable[i], worst_10$Importance[i]))
+    }
+  }
+  
+  # Save all importance data to CSV
   write.csv(imp_df, paste0(output_dir, "/rf_variable_importance.csv"), row.names = FALSE)
   
-  # Save top 50 variables to separate CSV
-  top_50 <- head(imp_df, 50)
-  write.csv(top_50, paste0(output_dir, "/rf_top_50_variables.csv"), row.names = FALSE)
+  # Save positive importance variables to separate CSV
+  write.csv(positive_imp, paste0(output_dir, "/rf_positive_importance.csv"), row.names = FALSE)
   
-  return(imp_df)
+  # Save top 50 positive variables to separate CSV
+  top_50_positive <- head(positive_imp, 50)
+  write.csv(top_50_positive, paste0(output_dir, "/rf_top_50_variables.csv"), row.names = FALSE)
+  
+  # Save negative importance variables to separate CSV
+  write.csv(negative_imp, paste0(output_dir, "/rf_negative_importance.csv"), row.names = FALSE)
+  
+  return(list(
+    all_importance = imp_df,
+    positive_importance = positive_imp,
+    negative_importance = negative_imp
+  ))
 }
 
 create_scatter_plot <- function(results, output_dir = "results") {
@@ -273,13 +326,15 @@ main_analysis <- function() {
   importance_df <- analyze_variable_importance(results$model)
   
   # Print final summary
-  cat("\n" + paste0(rep("=", 50), collapse = ""), "\n")
+  cat("\n", paste0(rep("=", 50), collapse = ""), "\n")
   cat("ANALYSIS COMPLETE\n")
   cat(paste0(rep("=", 50), collapse = ""), "\n")
   cat("Files generated in 'results' directory:\n")
   cat("- rf_predicted_vs_actual.pdf (scatter plot)\n")
   cat("- rf_variable_importance.pdf (importance plot)\n")
   cat("- rf_variable_importance.csv (all variables)\n")
+  cat("- rf_positive_importance.csv (positive variables)\n")
+  cat("- rf_negative_importance.csv (negative variables)\n")
   cat("- rf_top_50_variables.csv (top 50 variables)\n")
   
   # Return results
