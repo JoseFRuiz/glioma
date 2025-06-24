@@ -181,20 +181,36 @@ analyze_variable_importance <- function(model, output_dir = "results") {
   cat("Mean importance:", round(mean(imp_df$Importance), 3), "\n")
   cat("Median importance:", round(median(imp_df$Importance), 3), "\n")
   
-  # Create variable importance plot (only positive importance)
-  if (nrow(positive_imp) > 0) {
+  # Create variable importance plot (both positive and negative)
+  if (nrow(imp_df) > 0) {
     pdf(paste0(output_dir, "/rf_variable_importance.pdf"), 
-        width = 12, height = max(8, nrow(positive_imp) * 0.3))
+        width = 12, height = max(8, nrow(imp_df) * 0.3))
     
     par(mar = c(5, 12, 4, 2))
-    barplot(positive_imp$Importance, 
-            names.arg = positive_imp$Variable,
+    
+    # Prepare data for plotting
+    plot_data <- imp_df
+    plot_data$Color <- ifelse(plot_data$Importance > 0, "steelblue", "red")
+    plot_data$Importance_abs <- abs(plot_data$Importance)
+    
+    # Create barplot with colors
+    barplot(plot_data$Importance, 
+            names.arg = plot_data$Variable,
             horiz = TRUE,
             las = 2,
-            col = "steelblue",
-            main = "Random Forest Variable Importance (Positive Only)",
+            col = plot_data$Color,
+            main = "Random Forest Variable Importance (Positive and Negative)",
             xlab = "Importance Score",
             cex.names = 0.8)
+    
+    # Add vertical line at zero
+    abline(v = 0, col = "black", lty = 2, lwd = 1)
+    
+    # Add legend
+    legend("topright", 
+           legend = c("Positive Importance", "Negative Importance"),
+           fill = c("steelblue", "red"),
+           cex = 0.8)
     
     dev.off()
   }
@@ -217,6 +233,17 @@ analyze_variable_importance <- function(model, output_dir = "results") {
     }
   }
   
+  # Print top 20 variables by absolute importance (both positive and negative)
+  cat("\nTop 20 Variables by Absolute Importance:\n")
+  cat("========================================\n")
+  imp_df_abs <- imp_df
+  imp_df_abs$Abs_Importance <- abs(imp_df_abs$Importance)
+  top_20_abs <- head(imp_df_abs[order(-imp_df_abs$Abs_Importance), ], 20)
+  for (i in 1:nrow(top_20_abs)) {
+    sign_symbol <- ifelse(top_20_abs$Importance[i] > 0, "+", "-")
+    cat(sprintf("%2d. %-30s: %s%8.3f\n", i, top_20_abs$Variable[i], sign_symbol, abs(top_20_abs$Importance[i])))
+  }
+  
   # Save all importance data to CSV
   write.csv(imp_df, paste0(output_dir, "/rf_variable_importance.csv"), row.names = FALSE)
   
@@ -230,10 +257,16 @@ analyze_variable_importance <- function(model, output_dir = "results") {
   # Save negative importance variables to separate CSV
   write.csv(negative_imp, paste0(output_dir, "/rf_negative_importance.csv"), row.names = FALSE)
   
+  # Save top 50 variables by absolute importance to separate CSV
+  top_50_abs <- head(imp_df_abs[order(-imp_df_abs$Abs_Importance), ], 50)
+  write.csv(top_50_abs[, c("Variable", "Importance", "Abs_Importance")], 
+            paste0(output_dir, "/rf_top_50_absolute_importance.csv"), row.names = FALSE)
+  
   return(list(
     all_importance = imp_df,
     positive_importance = positive_imp,
-    negative_importance = negative_imp
+    negative_importance = negative_imp,
+    absolute_importance = imp_df_abs
   ))
 }
 
@@ -336,6 +369,7 @@ main_analysis <- function() {
   cat("- rf_positive_importance.csv (positive variables)\n")
   cat("- rf_negative_importance.csv (negative variables)\n")
   cat("- rf_top_50_variables.csv (top 50 variables)\n")
+  cat("- rf_top_50_absolute_importance.csv (top 50 by absolute importance)\n")
   
   # Return results
   return(list(
