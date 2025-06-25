@@ -1,5 +1,5 @@
 # =============================================================================
-# Glioma Survival Prediction - Data Preparation Script (FIXED)
+# Glioma Survival Prediction - Data Preparation Script
 # =============================================================================
 
 # Install required packages (uncomment if needed)
@@ -16,7 +16,7 @@ library(dplyr)
 
 # Create results directory if it doesn't exist
 if (!dir.exists("results")) {
-  dir.create("results")
+  dir.create("results", recursive = TRUE)
 }
 
 # Set random seed for reproducibility
@@ -27,81 +27,122 @@ set.seed(123)
 # =============================================================================
 
 load_clinical_data <- function(file_path = "data/ClinicaGliomasMayo2025.xlsx") {
-  # Load clinical data from Excel file
   cat("Loading clinical data from:", file_path, "\n")
-  read_excel(file_path)
+  data <- read_excel(file_path)
+  
+  # Clean TCGACode
+  if (!"TCGACode" %in% names(data)) stop("Missing 'TCGACode' column in clinical data.")
+  data$TCGACode <- trimws(as.character(data$TCGACode))
+  
+  # Check required outcome column
+  if (!"days_to_death.demographic" %in% names(data)) {
+    stop("Column 'days_to_death.demographic' not found in clinical data.")
+  }
+  
+  return(data)
 }
 
 load_xcell_data <- function(file_path = "data/xCell_gene_tpm_Mayo2025.xlsx") {
-  # Load and reshape xCell gene expression data
   cat("Loading xCell data from:", file_path, "\n")
   xcell_data <- read_excel(file_path)
   
-  # Reshape: make TCGACode a column and CellType as column names
+  # Check expected structure
+  if (!"CellType" %in% names(xcell_data)) {
+    stop("Missing 'CellType' column in xCell data.")
+  }
+  
+  # Transpose data: columns are TCGACode samples
   xcell_t <- as.data.frame(t(xcell_data[,-1]))
   CellTypeNames <- xcell_data$CellType
   colnames(xcell_t) <- CellTypeNames
   xcell_t$TCGACode <- colnames(xcell_data)[-1]
+  xcell_t$TCGACode <- trimws(as.character(xcell_t$TCGACode))
   xcell_t <- xcell_t %>% relocate(TCGACode)
   
-  cat("Reshaped xCell data with", ncol(xcell_t)-1, "cell types\n")
-  
+  cat("Reshaped xCell data with", ncol(xcell_t) - 1, "cell types\n")
   return(list(data = xcell_t, cell_types = CellTypeNames))
 }
 
 prepare_dataset <- function(clinica_data, xcell_data, cell_types) {
-  # Prepare dataset for modeling
   cat("Merging clinical and xCell data...\n")
   
-  # Merge clinical and xCell data
   merged_data <- left_join(
-    clinica_data[, c("TCGACode", "days_to_death.demographic")], 
-    xcell_data, 
+    clinica_data[, c("TCGACode", "days_to_death.demographic")],
+    xcell_data,
     by = "TCGACode"
   )
   
-  # Prepare data: use only CellTypeNames as predictors
   xcell_features <- as.character(cell_types)
+  
+  if (!all(xcell_features %in% colnames(merged_data))) {
+    warning("Some expected xCell features were not found in merged data.")
+    xcell_features <- intersect(xcell_features, colnames(merged_data))
+  }
+  
   data_xcell <- merged_data[, c("days_to_death.demographic", xcell_features)]
-  data_xcell <- na.omit(data_xcell)  # Remove rows with missing values
+  data_xcell <- na.omit(data_xcell)
   
-  cat("Final dataset prepared with", nrow(data_xcell), "samples and", ncol(data_xcell)-1, "features\n")
+  if (nrow(data_xcell) == 0) {
+    stop("No data left after removing missing values.")
+  }
   
+  cat("Final dataset prepared with", nrow(data_xcell), "samples and", ncol(data_xcell) - 1, "features\n")
   return(data_xcell)
 }
 
 # =============================================================================
-# Save Full Dataset (FIXED approach)
+# Data Splitting and Saving
 # =============================================================================
 
-save_full_dataset <- function(data, output_dir = "results") {
-  # Save the full dataset (no splitting)
-  cat("Saving full dataset...\n")
+split_and_save_data <- function(data, train_ratio = 0.7, output_dir = "results") {
+  if (!dir.exists(output_dir)) dir.create(output_dir, recursive = TRUE)
   
-  # Save full dataset
-  full_data_file <- paste0(output_dir, "/full_data.csv")
-  write.csv(data, full_data_file, row.names = FALSE)
+  cat("Splitting data into training (", train_ratio * 100, "%) and test (", (1 - train_ratio) * 100, "%) sets...\n")
+  train_indices <- createDataPartition(data$days_to_death.demographic, p = train_ratio, list = FALSE)
   
-  cat("Full dataset saved to:", full_data_file, "(", nrow(data), "samples)\n")
+  train_data <- data[train_indices, ]
+  test_data <- data[-train_indices, ]
   
-  # Print dataset statistics
-  cat("\nDataset Summary:\n")
-  cat("================\n")
+  # Save datasets
+  train_file <- file.path(output_dir, "train_data.csv")
+  test_file <- file.path(output_dir, "test_data.csv")
+  write.csv(train_data, train_file, row.names = FALSE)
+  write.csv(test_data, test_file, row.names = FALSE)
+  
+  cat("Training set saved to:", train_file, "(", nrow(train_data), "samples)\n")
+  cat("Test set saved to:", test_file, "(", nrow(test_data), "samples)\n")
+  
+  # Save split metadata
+  indices_file <- file.path(output_dir, "data_split_indices.csv")
+  split_info <- data.frame(
+    sample_index = 1:nrow(data),
+    is_training = 1:nrow(data) %in% train_indices
+  )
+  write.csv(split_info, indices_file, row.names = FALSE)
+  cat("Split indices saved to:", indices_file, "\n")
+  
+  # Print basic stats
+  cat("\nData Split Summary:\n")
+  cat("==================\n")
   cat("Total samples:", nrow(data), "\n")
-  cat("Number of features:", ncol(data) - 1, "\n")
+  cat("Training samples:", nrow(train_data), "\n")
+  cat("Test samples:", nrow(test_data), "\n")
+  cat("Training ratio:", round(nrow(train_data) / nrow(data), 3), "\n")
   
-  # Print target variable statistics
+  # Target variable stats
   cat("\nTarget Variable Statistics:\n")
   cat("==========================\n")
-  cat("Mean days to death:", round(mean(data$days_to_death.demographic), 1), "\n")
-  cat("Median days to death:", round(median(data$days_to_death.demographic), 1), "\n")
-  cat("Min days to death:", round(min(data$days_to_death.demographic), 1), "\n")
-  cat("Max days to death:", round(max(data$days_to_death.demographic), 1), "\n")
-  cat("Standard deviation:", round(sd(data$days_to_death.demographic), 1), "\n")
+  cat("Training set - Mean:", round(mean(train_data$days_to_death.demographic), 1), "\n")
+  cat("Training set - Median:", round(median(train_data$days_to_death.demographic), 1), "\n")
+  cat("Test set - Mean:", round(mean(test_data$days_to_death.demographic), 1), "\n")
+  cat("Test set - Median:", round(median(test_data$days_to_death.demographic), 1), "\n")
   
   return(list(
-    full_data = data,
-    full_data_file = full_data_file
+    train_data = train_data,
+    test_data = test_data,
+    train_indices = train_indices,
+    train_file = train_file,
+    test_file = test_file
   ))
 }
 
@@ -110,38 +151,37 @@ save_full_dataset <- function(data, output_dir = "results") {
 # =============================================================================
 
 main_data_preparation <- function() {
-  # Main data preparation pipeline
+  cat("Glioma Survival Prediction - Data Preparation\n")
+  cat("============================================\n\n")
   
-  cat("Glioma Survival Prediction - Data Preparation (FIXED)\n")
-  cat("====================================================\n\n")
-  
-  # Load data
+  # Step 1: Load data
   cat("Step 1: Loading data...\n")
   clinica_data <- load_clinical_data()
   xcell_data_list <- load_xcell_data()
   
-  # Prepare dataset
+  # Step 2: Prepare dataset
   cat("\nStep 2: Preparing dataset...\n")
   data_xcell <- prepare_dataset(
-    clinica_data, 
-    xcell_data_list$data, 
+    clinica_data,
+    xcell_data_list$data,
     xcell_data_list$cell_types
   )
   
-  # Save full dataset (no splitting)
-  cat("\nStep 3: Saving full dataset...\n")
-  save_results <- save_full_dataset(data_xcell)
+  # Step 3: Split and save data
+  cat("\nStep 3: Splitting and saving data...\n")
+  split_results <- split_and_save_data(data_xcell)
   
-  # Print final summary
+  # Final summary
   cat("\n", paste0(rep("=", 50), collapse = ""), "\n")
-  cat("DATA PREPARATION COMPLETE (FIXED)\n")
+  cat("DATA PREPARATION COMPLETE\n")
   cat(paste0(rep("=", 50), collapse = ""), "\n")
   cat("Files generated in 'results' directory:\n")
-  cat("- full_data.csv (complete dataset)\n")
-  cat("\nNote: This approach saves the full dataset to match the original methodology.\n")
-  cat("The train/test split will be handled by caret during model training.\n")
+  cat("- train_data.csv (training set)\n")
+  cat("- test_data.csv (test set)\n")
+  cat("- data_split_indices.csv (split information)\n")
+  cat("\nNote: Data has been explicitly split to avoid bias in model training.\n")
   
-  return(save_results)
+  return(split_results)
 }
 
 # =============================================================================
@@ -149,6 +189,5 @@ main_data_preparation <- function() {
 # =============================================================================
 
 if (!interactive()) {
-  # Run the data preparation if script is executed directly
   results <- main_data_preparation()
-} 
+}

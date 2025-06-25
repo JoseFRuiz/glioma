@@ -1,5 +1,5 @@
 # =============================================================================
-# Glioma Survival Prediction - Simple Evaluation Script
+# Glioma Survival Prediction - Evaluation Script
 # =============================================================================
 
 # Install required packages (uncomment if needed)
@@ -239,8 +239,8 @@ print_evaluation_summary <- function(metrics, n_samples) {
 main_evaluation <- function() {
   # Main evaluation pipeline
   
-  cat("Glioma Survival Prediction - Simple Evaluation\n")
-  cat("==============================================\n\n")
+  cat("Glioma Survival Prediction - Evaluation\n")
+  cat("=======================================\n\n")
   
   # Load test results
   cat("Step 1: Loading test results...\n")

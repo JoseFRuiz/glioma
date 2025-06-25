@@ -1,5 +1,5 @@
 # =============================================================================
-# Glioma Survival Prediction - Model Training Script (FIXED V2)
+# Glioma Survival Prediction - Model Training Script (Revised)
 # =============================================================================
 
 # Install required packages (uncomment if needed)
@@ -15,95 +15,110 @@ library(dplyr)
 # =============================================================================
 
 # Create results directory if it doesn't exist
-if (!dir.exists("results")) {
-  dir.create("results")
-}
+output_dir <- "results"
+if (!dir.exists(output_dir)) dir.create(output_dir, recursive = TRUE)
 
 # Set random seed for reproducibility
 set.seed(123)
 
 # =============================================================================
-# Data Loading Function
+# Data Loading Functions
 # =============================================================================
 
-load_full_data <- function(file_path = "results/full_data.csv") {
-  # Load full dataset from CSV file
-  cat("Loading full dataset from:", file_path, "\n")
-  full_data <- read.csv(file_path)
+load_training_data <- function(file_path = file.path(output_dir, "train_data.csv")) {
+  cat("Loading training data from:", file_path, "\n")
+  train_data <- read.csv(file_path)
   
-  cat("Full dataset loaded with", nrow(full_data), "samples and", ncol(full_data)-1, "features\n")
+  if (!"days_to_death.demographic" %in% names(train_data)) {
+    stop("Column 'days_to_death.demographic' not found in training data.")
+  }
   
-  return(full_data)
+  cat("Training data loaded with", nrow(train_data), "samples and", ncol(train_data) - 1, "features\n")
+  return(train_data)
+}
+
+load_test_data <- function(file_path = file.path(output_dir, "test_data.csv")) {
+  cat("Loading test data from:", file_path, "\n")
+  test_data <- read.csv(file_path)
+  
+  if (!"days_to_death.demographic" %in% names(test_data)) {
+    stop("Column 'days_to_death.demographic' not found in test data.")
+  }
+  
+  cat("Test data loaded with", nrow(test_data), "samples and", ncol(test_data) - 1, "features\n")
+  return(test_data)
 }
 
 # =============================================================================
-# Model Training Functions (EXACTLY like original rf_classifier.R)
+# Model Training Functions
 # =============================================================================
 
-setup_train_control <- function(method = "boot", number = 1, p = 0.7) {
-  # Set up training control parameters (exactly like original)
+setup_train_control <- function(method = "cv", number = 5) {
   trainControl(
     method = method,
     number = number,
-    p = p,
-    savePredictions = TRUE,
+    savePredictions = "final",
     returnResamp = "all"
   )
 }
 
-train_rf_model <- function(data, ctrl) {
-  # Train Random Forest model and evaluate performance (exactly like original)
-  cat("Training Random Forest model on full dataset...\n")
+train_rf_model <- function(train_data, ctrl) {
+  cat("Training Random Forest model on training data...\n")
   
-  # Train model on full dataset (same as original)
+  # Remove zero-variance predictors
+  nzv <- nearZeroVar(train_data, saveMetrics = TRUE)
+  if (any(nzv$zeroVar)) {
+    cat("Removing", sum(nzv$zeroVar), "predictors with zero variance...\n")
+    train_data <- train_data[, !names(train_data) %in% rownames(nzv[nzv$zeroVar, ])]
+  }
+  
   model <- train(
     days_to_death.demographic ~ .,
-    data = data,
+    data = train_data,
     method = "rf",
     trControl = ctrl,
-    importance = TRUE  # Enable variable importance
+    importance = TRUE
   )
   
   cat("Model training completed\n")
-  
   return(model)
 }
 
-calculate_calibration_and_predictions <- function(model, data) {
-  # Calculate calibration parameters and test predictions (exactly like original)
+calculate_calibration_and_predictions <- function(model, train_data, test_data) {
   cat("Calculating calibration parameters and test predictions...\n")
   
-  # Get test set indices (same as original)
-  train_indices <- model$control$index[[1]]
-  test_indices <- setdiff(1:nrow(data), train_indices)
+  # Use model$pred for true out-of-fold predictions if available
+  if (!is.null(model$pred)) {
+    # Use final model tuning parameters only
+    best_tune <- model$bestTune
+    pred_data <- model$pred
+    for (param in names(best_tune)) {
+      pred_data <- pred_data[pred_data[[param]] == best_tune[[param]], ]
+    }
+    cv_predictions <- pred_data$pred
+    cv_actual <- pred_data$obs
+  } else {
+    cv_predictions <- predict(model, newdata = train_data)
+    cv_actual <- train_data$days_to_death.demographic
+    warning("Out-of-fold predictions not found; using fitted predictions instead.")
+  }
   
-  cat("Training samples:", length(train_indices), "\n")
-  cat("Test samples:", length(test_indices), "\n")
-  
-  # Get predictions for training data (same as original)
-  train_predictions <- predict(model, newdata = data[train_indices,])
-  train_actual <- data$days_to_death.demographic[train_indices]
-  
-  # Fit linear model: actual = alpha * prediction + beta (same as original)
-  calib_lm <- lm(train_actual ~ train_predictions)
-  
-  # Extract coefficients
-  alpha <- calib_lm$coefficients["train_predictions"]
-  beta <- calib_lm$coefficients["(Intercept)"]
-  
-  # Calculate R-squared of calibration
+  # Calibration model
+  calib_lm <- lm(cv_actual ~ cv_predictions)
+  alpha <- coef(calib_lm)["cv_predictions"]
+  beta <- coef(calib_lm)["(Intercept)"]
   calib_r_squared <- summary(calib_lm)$r.squared
   
-  # Apply calibration to test predictions (same as original)
-  test_predictions <- predict(model, newdata = data[test_indices,])
+  # Predict on test set and apply calibration
+  test_predictions <- predict(model, newdata = test_data)
   test_predictions <- alpha * test_predictions + beta
-  test_actual <- data$days_to_death.demographic[test_indices]
+  test_actual <- test_data$days_to_death.demographic
   
-  # Calculate performance metrics (same as original)
+  # Performance metrics
   correlation <- cor(test_actual, test_predictions)
   rmse <- sqrt(mean((test_actual - test_predictions)^2))
   mae <- mean(abs(test_actual - test_predictions))
-  r_squared <- cor(test_actual, test_predictions)^2
+  r_squared <- correlation^2
   
   cat("Calibration parameters calculated:\n")
   cat("Alpha (slope):", round(alpha, 4), "\n")
@@ -124,7 +139,6 @@ calculate_calibration_and_predictions <- function(model, data) {
     rmse = rmse,
     mae = mae,
     r_squared = r_squared,
-    test_indices = test_indices,
     alpha = alpha,
     beta = beta,
     calibration_r_squared = calib_r_squared,
@@ -133,91 +147,83 @@ calculate_calibration_and_predictions <- function(model, data) {
 }
 
 save_model_and_parameters <- function(results, output_dir = "results") {
-  # Save the trained model and calibration parameters
+  if (!dir.exists(output_dir)) dir.create(output_dir, recursive = TRUE)
   
-  # Save the Random Forest model
-  model_file <- paste0(output_dir, "/rf_model.rds")
+  # Save model
+  model_file <- file.path(output_dir, "rf_model.rds")
   saveRDS(results$model, model_file)
   cat("Model saved to:", model_file, "\n")
   
   # Save calibration parameters
-  calib_file <- paste0(output_dir, "/calibration_parameters.rds")
-  calibration_params <- list(
+  calib_file <- file.path(output_dir, "calibration_parameters.rds")
+  saveRDS(list(
     alpha = results$alpha,
     beta = results$beta,
     calibration_r_squared = results$calibration_r_squared,
     calibration_model = results$calibration_model
-  )
-  saveRDS(calibration_params, calib_file)
+  ), calib_file)
   cat("Calibration parameters saved to:", calib_file, "\n")
   
-  # Save calibration parameters as CSV for easy access
-  calib_csv <- paste0(output_dir, "/calibration_parameters.csv")
-  calib_df <- data.frame(
+  calib_csv <- file.path(output_dir, "calibration_parameters.csv")
+  write.csv(data.frame(
     Parameter = c("alpha", "beta", "calibration_r_squared"),
     Value = c(results$alpha, results$beta, results$calibration_r_squared)
-  )
-  write.csv(calib_df, calib_csv, row.names = FALSE)
+  ), calib_csv, row.names = FALSE)
   cat("Calibration parameters saved to:", calib_csv, "\n")
   
-  # Save test predictions and actual values
-  test_results_file <- paste0(output_dir, "/test_predictions.csv")
-  test_df <- data.frame(
+  # Save test predictions
+  test_results_file <- file.path(output_dir, "test_predictions.csv")
+  write.csv(data.frame(
     Actual = results$actual,
     Predicted = results$predictions,
     Residuals = results$actual - results$predictions
-  )
-  write.csv(test_df, test_results_file, row.names = FALSE)
+  ), test_results_file, row.names = FALSE)
   cat("Test predictions saved to:", test_results_file, "\n")
   
-  # Save model information
-  model_info_file <- paste0(output_dir, "/model_info.txt")
+  # Save model summary
+  model_info_file <- file.path(output_dir, "model_info.txt")
   sink(model_info_file)
   cat("Random Forest Model Information\n")
   cat("==============================\n")
   cat("Training date:", Sys.Date(), "\n")
   cat("Number of trees:", results$model$finalModel$ntree, "\n")
-  cat("Number of variables tried at each split:", results$model$finalModel$mtry, "\n")
-  cat("Total samples:", nrow(results$model$trainingData), "\n")
-  cat("Training samples:", length(results$model$control$index[[1]]), "\n")
-  cat("Test samples:", length(results$test_indices), "\n")
-  cat("Number of features:", ncol(results$model$trainingData) - 1, "\n")
+  cat("Variables per split (mtry):", results$model$finalModel$mtry, "\n")
+  cat("Training samples:", nrow(results$model$trainingData), "\n")
+  cat("Test samples:", length(results$actual), "\n")
+  cat("Features used:", ncol(results$model$trainingData) - 1, "\n")
   cat("\nCalibration Parameters:\n")
-  cat("Alpha (slope):", results$alpha, "\n")
-  cat("Beta (intercept):", results$beta, "\n")
+  cat("Alpha:", results$alpha, "\n")
+  cat("Beta:", results$beta, "\n")
   cat("Calibration R-squared:", results$calibration_r_squared, "\n")
   cat("\nTest Performance:\n")
   cat("Correlation:", results$correlation, "\n")
-  cat("RMSE:", results$rmse, "days\n")
-  cat("MAE:", results$mae, "days\n")
+  cat("RMSE:", results$rmse, "\n")
+  cat("MAE:", results$mae, "\n")
   cat("R-squared:", results$r_squared, "\n")
   sink()
-  
   cat("Model information saved to:", model_info_file, "\n")
 }
 
 print_training_summary <- function(results) {
-  # Print summary of training results
   cat("\nModel Training Summary:\n")
-  cat("======================\n")
-  cat("Model type: Random Forest\n")
-  cat("Number of trees:", results$model$finalModel$ntree, "\n")
-  cat("Number of variables tried at each split:", results$model$finalModel$mtry, "\n")
-  cat("Total samples:", nrow(results$model$trainingData), "\n")
-  cat("Training samples:", length(results$model$control$index[[1]]), "\n")
-  cat("Test samples:", length(results$test_indices), "\n")
-  cat("Number of features:", ncol(results$model$trainingData) - 1, "\n")
+  cat("=======================\n")
+  cat("Model: Random Forest\n")
+  cat("Trees:", results$model$finalModel$ntree, "\n")
+  cat("mtry:", results$model$finalModel$mtry, "\n")
+  cat("Training samples:", nrow(results$model$trainingData), "\n")
+  cat("Test samples:", length(results$actual), "\n")
+  cat("Features:", ncol(results$model$trainingData) - 1, "\n")
   
-  cat("\nCalibration Parameters:\n")
-  cat("Alpha (slope):", round(results$alpha, 4), "\n")
-  cat("Beta (intercept):", round(results$beta, 4), "\n")
-  cat("Calibration R-squared:", round(results$calibration_r_squared, 4), "\n")
+  cat("\nCalibration:\n")
+  cat("Alpha:", round(results$alpha, 4), "\n")
+  cat("Beta:", round(results$beta, 4), "\n")
+  cat("Calibration R²:", round(results$calibration_r_squared, 4), "\n")
   
   cat("\nTest Performance:\n")
   cat("Correlation:", round(results$correlation, 3), "\n")
   cat("RMSE:", round(results$rmse, 0), "days\n")
   cat("MAE:", round(results$mae, 0), "days\n")
-  cat("R-squared:", round(results$r_squared, 3), "\n")
+  cat("R²:", round(results$r_squared, 3), "\n")
 }
 
 # =============================================================================
@@ -225,46 +231,30 @@ print_training_summary <- function(results) {
 # =============================================================================
 
 main_model_training <- function() {
-  # Main model training pipeline
+  cat("Glioma Survival Prediction - Model Training\n")
+  cat("==========================================\n\n")
   
-  cat("Glioma Survival Prediction - Model Training (FIXED V2)\n")
-  cat("=====================================================\n\n")
+  # Step 1: Load data
+  train_data <- load_training_data()
+  test_data <- load_test_data()
   
-  # Load full data
-  cat("Step 1: Loading full dataset...\n")
-  full_data <- load_full_data()
-  
-  # Set up training control
-  cat("\nStep 2: Setting up training control...\n")
+  # Step 2: Train model
   ctrl <- setup_train_control()
+  model <- train_rf_model(train_data, ctrl)
   
-  # Train Random Forest model
-  cat("\nStep 3: Training Random Forest model...\n")
-  model <- train_rf_model(full_data, ctrl)
+  # Step 3: Calibration and evaluation
+  results <- calculate_calibration_and_predictions(model, train_data, test_data)
   
-  # Calculate calibration parameters and test predictions
-  cat("\nStep 4: Calculating calibration and test predictions...\n")
-  results <- calculate_calibration_and_predictions(model, full_data)
+  # Step 4: Save results
+  save_model_and_parameters(results, output_dir)
   
-  # Save model and parameters
-  cat("\nStep 5: Saving model and parameters...\n")
-  save_model_and_parameters(results)
-  
-  # Print training summary
+  # Step 5: Summary
   print_training_summary(results)
   
-  # Print final summary
-  cat("\n", paste0(rep("=", 50), collapse = ""), "\n")
-  cat("MODEL TRAINING COMPLETE (FIXED V2)\n")
-  cat(paste0(rep("=", 50), collapse = ""), "\n")
-  cat("Files generated in 'results' directory:\n")
-  cat("- rf_model.rds (trained model)\n")
-  cat("- calibration_parameters.rds (calibration parameters)\n")
-  cat("- calibration_parameters.csv (calibration parameters)\n")
-  cat("- test_predictions.csv (test predictions and actual values)\n")
-  cat("- model_info.txt (model information)\n")
-  
-  return(results)
+  cat("\n", paste(rep("=", 50), collapse = ""), "\n")
+  cat("MODEL TRAINING COMPLETE\n")
+  cat(paste(rep("=", 50), collapse = ""), "\n")
+  cat("Results saved to:", output_dir, "\n")
 }
 
 # =============================================================================
@@ -272,6 +262,5 @@ main_model_training <- function() {
 # =============================================================================
 
 if (!interactive()) {
-  # Run the model training if script is executed directly
   results <- main_model_training()
-} 
+}
