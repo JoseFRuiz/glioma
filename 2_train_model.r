@@ -1,5 +1,5 @@
 # =============================================================================
-# Glioma Survival Prediction - Improved Model Training Script
+# Glioma Survival Prediction - Model Training Script
 # =============================================================================
 
 # install.packages("corrplot")
@@ -145,28 +145,30 @@ train_selected_high <- remove_highly_correlated(train_selected_high, 0.8)
 train_selected_medium <- remove_highly_correlated(train_selected_medium, 0.8)
 train_selected_low <- remove_highly_correlated(train_selected_low, 0.8)
 
-# 6. Create interaction features for the medium feature set (simplified)
-if (ncol(train_selected_medium) > 2) {
-  cat("Creating interaction features...\n")
-  
-  # Get top 3 features by correlation (reduced from 5 to avoid too many interactions)
-  top_features <- names(sort(feature_cors_abs[names(train_selected_medium)[-1]], decreasing = TRUE)[1:3])
-  
-  # Create interaction terms (only top 3 interactions to avoid overfitting)
-  interaction_count <- 0
-  for (i in 1:(length(top_features)-1)) {
-    for (j in (i+1):length(top_features)) {
-      if (interaction_count < 3) {  # Limit to 3 interactions
-        feat1 <- top_features[i]
-        feat2 <- top_features[j]
-        interaction_name <- paste0(feat1, "_x_", feat2)
-        train_selected_medium[[interaction_name]] <- train_selected_medium[[feat1]] * train_selected_medium[[feat2]]
-        interaction_count <- interaction_count + 1
-      }
+# 6. Add interaction features from data preparation (do not create new ones)
+interaction_features_file <- "results/interaction_features.txt"
+if (file.exists(interaction_features_file)) {
+  interaction_features <- readLines(interaction_features_file)
+  cat("Using interaction features from data preparation:", paste(interaction_features, collapse=", "), "\n")
+  for (iname in interaction_features) {
+    parts <- strsplit(iname, "_x_")[[1]]
+    # Only add if both base features exist in the data frame
+    if (all(parts %in% names(train_selected_medium))) {
+      train_selected_medium[[iname]] <- train_selected_medium[[parts[1]]] * train_selected_medium[[parts[2]]]
+    }
+    if (all(parts %in% names(train_selected_high))) {
+      train_selected_high[[iname]] <- train_selected_high[[parts[1]]] * train_selected_high[[parts[2]]]
+    }
+    if (all(parts %in% names(train_selected_low))) {
+      train_selected_low[[iname]] <- train_selected_low[[parts[1]]] * train_selected_low[[parts[2]]]
     }
   }
-  cat("Added", interaction_count, "interaction features\n")
+} else {
+  cat("No interaction features file found; skipping interaction features.\n")
 }
+
+# Save selected features for the medium set (used for best model by default), after all feature engineering
+write.csv(data.frame(Feature = names(train_selected_medium)[-1]), "results/selected_features.csv", row.names = FALSE)
 
 # =============================================================================
 # Enhanced Data Scaling
@@ -182,7 +184,7 @@ train_scaled_medium <- predict(preprocess_params_medium, train_selected_medium)
 train_scaled_low <- predict(preprocess_params_low, train_selected_low)
 
 # Save preprocessing parameters (use medium as default)
-saveRDS(preprocess_params_medium, "results/improved_preprocessing_params.rds")
+saveRDS(preprocess_params_medium, "results/preprocessing_params.rds")
 cat("Preprocessing parameters saved\n")
 
 # =============================================================================
@@ -380,12 +382,12 @@ if (!dir.exists("results")) {
 }
 
 # Save all enhanced models
-saveRDS(all_models_enhanced, "results/improved_models.rds")
-cat("All enhanced models saved to: results/improved_models.rds\n")
+saveRDS(all_models_enhanced, "results/models.rds")
+cat("All enhanced models saved to: results/models.rds\n")
 
 # Save best model
-saveRDS(best_model_enhanced, "results/best_improved_model.rds")
-cat("Best enhanced model (", best_model_name_enhanced, ") saved to: results/best_improved_model.rds\n")
+saveRDS(best_model_enhanced, "results/best_model.rds")
+cat("Best enhanced model (", best_model_name_enhanced, ") saved to: results/best_model.rds\n")
 
 # =============================================================================
 # Enhanced Feature Importance Analysis
@@ -405,14 +407,14 @@ if (length(rf_models) > 0) {
   importance_data <- importance_data[order(-importance_data$Overall), ]
   
   # Save variable importance
-  write.csv(importance_data, "results/improved_variable_importance.csv", row.names = FALSE)
-  cat("Variable importance saved to: results/improved_variable_importance.csv\n")
+  write.csv(importance_data, "results/variable_importance.csv", row.names = FALSE)
+  cat("Variable importance saved to: results/variable_importance.csv\n")
   
   # Plot importance
-  png("results/improved_variable_importance_plot.png", width = 10, height = 8, units = "in", res = 300)
+  png("results/variable_importance_plot.png", width = 10, height = 8, units = "in", res = 300)
   plot(imp, top = 15, main = "Top 15 Variable Importance (Enhanced RF)")
   dev.off()
-  cat("Variable importance plot saved to: results/improved_variable_importance_plot.png\n")
+  cat("Variable importance plot saved to: results/variable_importance_plot.png\n")
 }
 
 # For regularized models
@@ -427,23 +429,23 @@ if (length(reg_models) > 0) {
   )
   coef_df <- coef_df[order(-abs(coef_df$Coefficient)), ]
   
-  write.csv(coef_df, "results/improved_coefficients.csv", row.names = FALSE)
-  cat("Model coefficients saved to: results/improved_coefficients.csv\n")
+  write.csv(coef_df, "results/coefficients.csv", row.names = FALSE)
+  cat("Model coefficients saved to: results/coefficients.csv\n")
   
   # Plot coefficients
-  png("results/improved_coefficients_plot.png", width = 12, height = 8, units = "in", res = 300)
+  png("results/coefficients_plot.png", width = 12, height = 8, units = "in", res = 300)
   barplot(coef_df$Coefficient[1:15], names.arg = coef_df$Variable[1:15], 
           main = paste("Top 15 Coefficients (", names(best_reg), ")"),
           las = 2, cex.names = 0.8)
   dev.off()
-  cat("Coefficients plot saved to: results/improved_coefficients_plot.png\n")
+  cat("Coefficients plot saved to: results/coefficients_plot.png\n")
 }
 
 # =============================================================================
 # Save Enhanced Model Information
 # =============================================================================
 
-model_info_file <- "results/improved_model_info.txt"
+model_info_file <- "results/model_info.txt"
 sink(model_info_file)
 cat("Enhanced Model Training Information\n")
 cat("==================================\n")
@@ -481,12 +483,13 @@ cat("- Interaction feature creation\n")
 cat("- Advanced model tuning\n")
 cat("- Robust error handling\n")
 cat("\nFiles generated in 'results' directory:\n")
-cat("- improved_models.rds (all enhanced models)\n")
-cat("- best_improved_model.rds (best performing model)\n")
-cat("- improved_preprocessing_params.rds (preprocessing parameters)\n")
-cat("- improved_model_info.txt (training information)\n")
-cat("- improved_variable_importance.csv (feature importance)\n")
-cat("- improved_variable_importance_plot.png (importance plot)\n")
-cat("- improved_coefficients.csv (model coefficients)\n")
-cat("- improved_coefficients_plot.png (coefficients plot)\n")
+cat("- models.rds (all enhanced models)\n")
+cat("- best_model.rds (best performing model)\n")
+cat("- preprocessing_params.rds (preprocessing parameters)\n")
+cat("- model_info.txt (training information)\n")
+cat("- variable_importance.csv (feature importance)\n")
+cat("- variable_importance_plot.png (importance plot)\n")
+cat("- coefficients.csv (model coefficients)\n")
+cat("- coefficients_plot.png (coefficients plot)\n")
+cat("- selected_features.csv (selected features)\n")
 cat("\nEnhanced models are ready for prediction using the prediction script.\n") 

@@ -170,7 +170,43 @@ main_data_preparation <- function() {
   # Step 3: Split and save data
   cat("\nStep 3: Splitting and saving data...\n")
   split_results <- split_and_save_data(data_xcell)
-  
+
+  # =============================
+  # Add interaction features to train and test sets
+  # =============================
+  cat("\nAdding interaction features to train and test sets...\n")
+  train_data <- split_results$train_data
+  test_data <- split_results$test_data
+
+  # Compute correlations on the full dataset (excluding target)
+  features <- data_xcell[, -1]
+  target <- data_xcell$days_to_death.demographic
+  feature_cors <- sapply(features, function(x) cor(x, target, use = "complete.obs"))
+  feature_cors_abs <- abs(feature_cors)
+  top_features <- names(sort(feature_cors_abs, decreasing = TRUE)[1:3])
+
+  # Create interaction features (all pairwise for top 3)
+  interaction_names <- c()
+  for (i in 1:(length(top_features)-1)) {
+    for (j in (i+1):length(top_features)) {
+      feat1 <- top_features[i]
+      feat2 <- top_features[j]
+      interaction_name <- paste0(feat1, "_x_", feat2)
+      train_data[[interaction_name]] <- train_data[[feat1]] * train_data[[feat2]]
+      test_data[[interaction_name]] <- test_data[[feat1]] * test_data[[feat2]]
+      interaction_names <- c(interaction_names, interaction_name)
+    }
+  }
+  cat("Added interaction features:", paste(interaction_names, collapse=", "), "\n")
+
+  # Save interaction feature names for downstream scripts
+  writeLines(interaction_names, "results/interaction_features.txt")
+
+  # Save updated train and test sets with interaction features
+  write.csv(train_data, split_results$train_file, row.names = FALSE)
+  write.csv(test_data, split_results$test_file, row.names = FALSE)
+  cat("Updated training and test sets saved with interaction features.\n")
+
   # Final summary
   cat("\n", paste0(rep("=", 50), collapse = ""), "\n")
   cat("DATA PREPARATION COMPLETE\n")
@@ -179,6 +215,7 @@ main_data_preparation <- function() {
   cat("- train_data.csv (training set)\n")
   cat("- test_data.csv (test set)\n")
   cat("- data_split_indices.csv (split information)\n")
+  cat("- interaction_features.txt (interaction feature names)\n")
   cat("\nNote: Data has been explicitly split to avoid bias in model training.\n")
   
   return(split_results)
