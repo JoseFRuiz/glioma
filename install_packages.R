@@ -1,52 +1,37 @@
 # =============================================================================
-# Package Installation Script for Glioma Analysis
+# Install Required Packages for Glioma Survival Prediction
 # =============================================================================
 
 # List of required packages
-required_packages <- c("readxl", "caret", "randomForest", "dplyr")
+required_packages <- c(
+  "readxl",
+  "caret", 
+  "randomForest",
+  "ggplot2",
+  "dplyr",
+  "glmnet",
+  "e1071",
+  "corrplot",
+  "xgboost"
+)
 
-# Function to check if packages are installed
-check_and_install_packages <- function(packages) {
-  cat("Checking and installing required packages...\n")
-  cat("============================================\n\n")
-  
+# Function to install packages if not already installed
+install_if_missing <- function(packages) {
   for (package in packages) {
-    cat(sprintf("Checking package: %s\n", package))
-    
     if (!require(package, character.only = TRUE, quietly = TRUE)) {
-      cat(sprintf("  Installing %s...\n", package))
+      cat("Installing package:", package, "\n")
       install.packages(package, dependencies = TRUE)
-      
-      # Check if installation was successful
-      if (require(package, character.only = TRUE, quietly = TRUE)) {
-        cat(sprintf("  ✓ %s installed successfully\n", package))
-      } else {
-        cat(sprintf("  ✗ Failed to install %s\n", package))
-      }
+      library(package, character.only = TRUE)
+      cat("Successfully installed and loaded:", package, "\n")
     } else {
-      cat(sprintf("  ✓ %s is already installed\n", package))
+      cat("Package already installed:", package, "\n")
     }
-    cat("\n")
   }
-  
-  cat("Package installation check complete!\n")
-  cat("====================================\n")
 }
 
-# Run the package installation
-check_and_install_packages(required_packages)
+# Install packages
+cat("Checking and installing required packages...\n")
+install_if_missing(required_packages)
 
-# Test loading all packages
-cat("Testing package loading...\n")
-cat("========================\n")
-
-for (package in required_packages) {
-  tryCatch({
-    library(package, character.only = TRUE)
-    cat(sprintf("✓ Successfully loaded %s\n", package))
-  }, error = function(e) {
-    cat(sprintf("✗ Failed to load %s: %s\n", package, e$message))
-  })
-}
-
-cat("\nAll packages are ready for use!\n") 
+cat("\nAll required packages are now available!\n")
+cat("You can now run the glioma survival prediction analysis.\n") 

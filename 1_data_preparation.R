@@ -225,6 +225,4 @@ main_data_preparation <- function() {
 # Run Data Preparation
 # =============================================================================
 
-if (!interactive()) {
-  results <- main_data_preparation()
-}
+results <- main_data_preparation()

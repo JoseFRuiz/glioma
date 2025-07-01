@@ -1,17 +1,12 @@
 # =============================================================================
-# Glioma Survival Prediction - Model Training Script
+# Glioma Survival Prediction - Simplified Model Training Script
 # =============================================================================
-
-# install.packages("corrplot")
 
 # Required packages
 library(caret)
 library(randomForest)
 library(ggplot2)
 library(dplyr)
-library(glmnet)
-library(e1071)
-library(corrplot)
 
 # =============================================================================
 # Load Training Data
@@ -32,7 +27,7 @@ if (!"days_to_death.demographic" %in% names(train_data)) {
 cat("Loaded training data with", nrow(train_data), "samples and", ncol(train_data)-1, "features\n")
 
 # =============================================================================
-# Enhanced Data Analysis and Preprocessing
+# Data Preprocessing
 # =============================================================================
 
 set.seed(123)
@@ -43,34 +38,20 @@ cat("\nTarget variable analysis:\n")
 cat("Mean:", round(mean(target), 1), "\n")
 cat("Median:", round(median(target), 1), "\n")
 cat("SD:", round(sd(target), 1), "\n")
-cat("CV:", round(sd(target)/mean(target), 3), "\n")
 
-# Enhanced outlier handling - use IQR method for more robust winsorization
-q1 <- quantile(target, 0.25)
-q3 <- quantile(target, 0.75)
-iqr <- q3 - q1
-lower_bound <- q1 - 1.5 * iqr
-upper_bound <- q3 + 1.5 * iqr
-
-# Use 5th and 95th percentiles for winsorization
+# Simple outlier handling - use 5th and 95th percentiles
 q05 <- quantile(target, 0.05)
 q95 <- quantile(target, 0.95)
-
-cat("5th percentile:", q05, "\n")
-cat("95th percentile:", q95, "\n")
-cat("IQR-based bounds:", lower_bound, "to", upper_bound, "\n")
-
-# Winsorize target variable
 target_winsorized <- pmin(pmax(target, q05), q95)
 train_data$days_to_death.demographic <- target_winsorized
 
-cat("Outliers handled by winsorization\n")
+cat("Outliers handled by winsorization (5th-95th percentiles)\n")
 
 # =============================================================================
-# Enhanced Feature Selection and Engineering
+# Feature Selection
 # =============================================================================
 
-cat("\nPerforming enhanced feature selection...\n")
+cat("\nPerforming feature selection...\n")
 
 # 1. Remove zero-variance features
 nzv <- nearZeroVar(train_data, saveMetrics = TRUE)
@@ -85,25 +66,15 @@ target <- train_data$days_to_death.demographic
 feature_cors <- sapply(features, function(x) cor(x, target, use = "complete.obs"))
 feature_cors_abs <- abs(feature_cors)
 
-# 3. Enhanced feature selection with multiple thresholds
-cor_threshold_high <- 0.15  # More stringent threshold
-cor_threshold_medium <- 0.1  # Original threshold
-cor_threshold_low <- 0.05   # Lower threshold for more features
+# 3. Select features with correlation > 0.1
+cor_threshold <- 0.1
+selected_features <- names(feature_cors_abs[feature_cors_abs > cor_threshold])
+cat("Features with |correlation| >", cor_threshold, ":", length(selected_features), "\n")
 
-selected_features_high <- names(feature_cors_abs[feature_cors_abs > cor_threshold_high])
-selected_features_medium <- names(feature_cors_abs[feature_cors_abs > cor_threshold_medium])
-selected_features_low <- names(feature_cors_abs[feature_cors_abs > cor_threshold_low])
+# 4. Create dataset with selected features
+train_selected <- train_data[, c("days_to_death.demographic", selected_features)]
 
-cat("Features with |correlation| >", cor_threshold_high, ":", length(selected_features_high), "\n")
-cat("Features with |correlation| >", cor_threshold_medium, ":", length(selected_features_medium), "\n")
-cat("Features with |correlation| >", cor_threshold_low, ":", length(selected_features_low), "\n")
-
-# 4. Create feature-engineered datasets with different feature sets
-train_selected_high <- train_data[, c("days_to_death.demographic", selected_features_high)]
-train_selected_medium <- train_data[, c("days_to_death.demographic", selected_features_medium)]
-train_selected_low <- train_data[, c("days_to_death.demographic", selected_features_low)]
-
-# 5. Enhanced multicollinearity handling
+# 5. Remove highly correlated features
 remove_highly_correlated <- function(data, threshold = 0.8) {
   if (ncol(data) <= 2) return(data)
   
@@ -140,240 +111,95 @@ remove_highly_correlated <- function(data, threshold = 0.8) {
   return(data)
 }
 
-# Apply multicollinearity removal to all feature sets
-train_selected_high <- remove_highly_correlated(train_selected_high, 0.8)
-train_selected_medium <- remove_highly_correlated(train_selected_medium, 0.8)
-train_selected_low <- remove_highly_correlated(train_selected_low, 0.8)
+train_selected <- remove_highly_correlated(train_selected, threshold = 0.8)
 
-# 6. Add interaction features from data preparation (do not create new ones)
-interaction_features_file <- "results/interaction_features.txt"
-if (file.exists(interaction_features_file)) {
-  interaction_features <- readLines(interaction_features_file)
-  cat("Using interaction features from data preparation:", paste(interaction_features, collapse=", "), "\n")
-  for (iname in interaction_features) {
-    parts <- strsplit(iname, "_x_")[[1]]
-    # Only add if both base features exist in the data frame
-    if (all(parts %in% names(train_selected_medium))) {
-      train_selected_medium[[iname]] <- train_selected_medium[[parts[1]]] * train_selected_medium[[parts[2]]]
-    }
-    if (all(parts %in% names(train_selected_high))) {
-      train_selected_high[[iname]] <- train_selected_high[[parts[1]]] * train_selected_high[[parts[2]]]
-    }
-    if (all(parts %in% names(train_selected_low))) {
-      train_selected_low[[iname]] <- train_selected_low[[parts[1]]] * train_selected_low[[parts[2]]]
-    }
-  }
-} else {
-  cat("No interaction features file found; skipping interaction features.\n")
+# Save selected features
+write.csv(data.frame(Feature = names(train_selected)[-1]), "results/selected_features.csv", row.names = FALSE)
+
+# =============================================================================
+# Train Random Forest Model
+# =============================================================================
+
+cat("\nTraining Random Forest model...\n")
+
+# Fast Random Forest training with simplified parameters
+rf_model <- train(
+  days_to_death.demographic ~ .,
+  data = train_selected,
+  method = "rf",
+  trControl = trainControl(method = "cv", number = 5, verboseIter = FALSE),
+  tuneLength = 3,  # Reduced tuning
+  importance = TRUE,
+  ntree = 200,  # Reduced number of trees for speed
+  mtry = max(1, floor(sqrt(ncol(train_selected) - 1)))
+)
+
+cat("Random Forest training completed\n")
+
+# =============================================================================
+# Model Evaluation
+# =============================================================================
+
+cat("\nModel Performance Summary:\n")
+cat("==========================\n")
+print(rf_model$results)
+
+# Get best model performance
+best_rmse <- min(rf_model$results$RMSE)
+best_r2 <- max(rf_model$results$Rsquared)
+best_mae <- min(rf_model$results$MAE)
+
+cat("\nBest Model Performance:\n")
+cat("RMSE:", round(best_rmse, 2), "\n")
+cat("R²:", round(best_r2, 3), "\n")
+cat("MAE:", round(best_mae, 2), "\n")
+
+# =============================================================================
+# Feature Importance Analysis
+# =============================================================================
+
+cat("\nFeature Importance Analysis:\n")
+cat("============================\n")
+
+imp <- varImp(rf_model)
+importance_data <- imp$importance
+importance_data$Variable <- rownames(importance_data)
+importance_data <- importance_data[order(-importance_data$Overall), ]
+
+# Save variable importance
+write.csv(importance_data, "results/variable_importance.csv", row.names = FALSE)
+cat("Variable importance saved to: results/variable_importance.csv\n")
+
+# Separate positive and negative importance
+positive_importance <- importance_data[importance_data$Overall > 0, ]
+negative_importance <- importance_data[importance_data$Overall < 0, ]
+
+cat("\nPositive importance variables:", nrow(positive_importance), "\n")
+if (nrow(positive_importance) > 0) {
+  cat("Top 5 positive importance variables:\n")
+  print(head(positive_importance, 5))
 }
 
-# Save selected features for the medium set (used for best model by default), after all feature engineering
-write.csv(data.frame(Feature = names(train_selected_medium)[-1]), "results/selected_features.csv", row.names = FALSE)
-
-# =============================================================================
-# Enhanced Data Scaling
-# =============================================================================
-
-# Scale features for regularization methods
-preprocess_params_high <- preProcess(train_selected_high[,-1], method = c("center", "scale"))
-preprocess_params_medium <- preProcess(train_selected_medium[,-1], method = c("center", "scale"))
-preprocess_params_low <- preProcess(train_selected_low[,-1], method = c("center", "scale"))
-
-train_scaled_high <- predict(preprocess_params_high, train_selected_high)
-train_scaled_medium <- predict(preprocess_params_medium, train_selected_medium)
-train_scaled_low <- predict(preprocess_params_low, train_selected_low)
-
-# Save preprocessing parameters (use medium as default)
-saveRDS(preprocess_params_medium, "results/preprocessing_params.rds")
-cat("Preprocessing parameters saved\n")
-
-# =============================================================================
-# Enhanced Model Training with Multiple Approaches
-# =============================================================================
-
-cat("\nTraining enhanced models with multiple feature sets...\n")
-
-# Function to train models with different feature sets (simplified and more robust)
-train_models_with_features <- function(data, data_scaled, suffix) {
-  models <- list()
-  
-  # Ensure data is valid
-  if (nrow(data) < 10 || ncol(data) < 2) {
-    cat("Warning: Insufficient data for", suffix, "feature set\n")
-    return(models)
-  }
-  
-  # Check for any NA values
-  if (any(is.na(data))) {
-    cat("Warning: NA values found in", suffix, "feature set, removing rows\n")
-    data <- na.omit(data)
-    if (nrow(data) < 10) {
-      cat("Warning: Insufficient data after removing NA values for", suffix, "feature set\n")
-      return(models)
-    }
-  }
-  
-  tryCatch({
-    # 1. Random Forest with simplified tuning
-    cat("Training RF for", suffix, "features...\n")
-    rf_model <- train(
-      days_to_death.demographic ~ .,
-      data = data,
-      method = "rf",
-      trControl = trainControl(method = "cv", number = 5, verboseIter = FALSE),
-      tuneLength = 3,  # Reduced from 10
-      importance = TRUE,
-      ntree = 500,  # Reduced from 1000
-      mtry = max(1, floor(sqrt(ncol(data) - 1)))
-    )
-    models[["RF"]] <- rf_model
-    cat("RF completed for", suffix, "\n")
-  }, error = function(e) {
-    cat("Error training RF for", suffix, ":", e$message, "\n")
-  })
-  
-  tryCatch({
-    # 2. Ridge Regression
-    cat("Training Ridge for", suffix, "features...\n")
-    ridge_model <- train(
-      days_to_death.demographic ~ .,
-      data = data_scaled,
-      method = "ridge",
-      trControl = trainControl(method = "cv", number = 5, verboseIter = FALSE),
-      tuneLength = 5,  # Reduced from 15
-      preProcess = NULL
-    )
-    models[["Ridge"]] <- ridge_model
-    cat("Ridge completed for", suffix, "\n")
-  }, error = function(e) {
-    cat("Error training Ridge for", suffix, ":", e$message, "\n")
-  })
-  
-  tryCatch({
-    # 3. Lasso Regression
-    cat("Training Lasso for", suffix, "features...\n")
-    lasso_model <- train(
-      days_to_death.demographic ~ .,
-      data = data_scaled,
-      method = "lasso",
-      trControl = trainControl(method = "cv", number = 5, verboseIter = FALSE),
-      tuneLength = 5,  # Reduced from 15
-      preProcess = NULL
-    )
-    models[["Lasso"]] <- lasso_model
-    cat("Lasso completed for", suffix, "\n")
-  }, error = function(e) {
-    cat("Error training Lasso for", suffix, ":", e$message, "\n")
-  })
-  
-  tryCatch({
-    # 4. Elastic Net
-    cat("Training Elastic Net for", suffix, "features...\n")
-    elastic_model <- train(
-      days_to_death.demographic ~ .,
-      data = data_scaled,
-      method = "glmnet",
-      trControl = trainControl(method = "cv", number = 5, verboseIter = FALSE),
-      tuneLength = 5,  # Reduced from 15
-      preProcess = NULL
-    )
-    models[["Elastic"]] <- elastic_model
-    cat("Elastic Net completed for", suffix, "\n")
-  }, error = function(e) {
-    cat("Error training Elastic Net for", suffix, ":", e$message, "\n")
-  })
-  
-  tryCatch({
-    # 5. Support Vector Regression (simplified)
-    cat("Training SVR for", suffix, "features...\n")
-    svr_model <- train(
-      days_to_death.demographic ~ .,
-      data = data_scaled,
-      method = "svmRadial",
-      trControl = trainControl(method = "cv", number = 5, verboseIter = FALSE),
-      tuneLength = 3,  # Reduced from 10
-      preProcess = NULL
-    )
-    models[["SVR"]] <- svr_model
-    cat("SVR completed for", suffix, "\n")
-  }, error = function(e) {
-    cat("Error training SVR for", suffix, ":", e$message, "\n")
-  })
-  
-  # Add suffix to model names
-  names(models) <- paste0(names(models), "_", suffix)
-  
-  return(models)
+cat("\nNegative importance variables:", nrow(negative_importance), "\n")
+if (nrow(negative_importance) > 0) {
+  cat("Top 5 negative importance variables:\n")
+  print(head(negative_importance, 5))
 }
 
-# Train models with different feature sets
-cat("Training models with high feature set...\n")
-models_high <- train_models_with_features(train_selected_high, train_scaled_high, "High")
+# Save positive and negative importance separately
+write.csv(positive_importance, "results/positive_importance.csv", row.names = FALSE)
+write.csv(negative_importance, "results/negative_importance.csv", row.names = FALSE)
 
-cat("Training models with medium feature set...\n")
-models_medium <- train_models_with_features(train_selected_medium, train_scaled_medium, "Medium")
-
-cat("Training models with low feature set...\n")
-models_low <- train_models_with_features(train_selected_low, train_scaled_low, "Low")
-
-# Combine all models
-all_models_enhanced <- c(models_high, models_medium, models_low)
-
-# Check if we have any successful models
-if (length(all_models_enhanced) == 0) {
-  stop("No models were successfully trained. Please check the data and try again.")
+# Plot importance (focus on positive importance for visualization)
+if (nrow(positive_importance) > 0) {
+  png("results/variable_importance_plot.png", width = 10, height = 8, units = "in", res = 300)
+  plot(imp, top = min(15, nrow(positive_importance)), main = "Top Variable Importance (Random Forest)")
+  dev.off()
+  cat("Variable importance plot saved to: results/variable_importance_plot.png\n")
 }
-
-cat("Successfully trained", length(all_models_enhanced), "models\n")
 
 # =============================================================================
-# Enhanced Model Comparison
-# =============================================================================
-
-# Compare all models
-cat("Comparing models...\n")
-model_comparison_enhanced <- resamples(all_models_enhanced)
-summary_enhanced <- summary(model_comparison_enhanced)
-
-cat("\nEnhanced Model Comparison (Cross-Validation Results):\n")
-cat("====================================================\n")
-print(summary_enhanced)
-
-# Find best model overall
-best_model_name_enhanced <- names(which.min(summary_enhanced$statistics$RMSE[,"Mean"]))
-best_model_enhanced <- all_models_enhanced[[best_model_name_enhanced]]
-
-# Find best model for each feature set
-high_models <- grep("_High$", names(all_models_enhanced))
-medium_models <- grep("_Medium$", names(all_models_enhanced))
-low_models <- grep("_Low$", names(all_models_enhanced))
-
-if (length(high_models) > 0) {
-  best_high <- names(which.min(summary_enhanced$statistics$RMSE[high_models, "Mean"]))
-} else {
-  best_high <- "None"
-}
-
-if (length(medium_models) > 0) {
-  best_medium <- names(which.min(summary_enhanced$statistics$RMSE[medium_models, "Mean"]))
-} else {
-  best_medium <- "None"
-}
-
-if (length(low_models) > 0) {
-  best_low <- names(which.min(summary_enhanced$statistics$RMSE[low_models, "Mean"]))
-} else {
-  best_low <- "None"
-}
-
-cat("\nBest models by feature set:\n")
-cat("High features:", best_high, "\n")
-cat("Medium features:", best_medium, "\n")
-cat("Low features:", best_low, "\n")
-cat("Overall best:", best_model_name_enhanced, "\n")
-
-# =============================================================================
-# Save Enhanced Models
+# Save Model
 # =============================================================================
 
 # Create results directory if it doesn't exist
@@ -381,115 +207,49 @@ if (!dir.exists("results")) {
   dir.create("results", recursive = TRUE)
 }
 
-# Save all enhanced models
-saveRDS(all_models_enhanced, "results/models.rds")
-cat("All enhanced models saved to: results/models.rds\n")
+# Save the model
+saveRDS(rf_model, "results/best_model.rds")
+cat("Best model saved to: results/best_model.rds\n")
 
-# Save best model
-saveRDS(best_model_enhanced, "results/best_model.rds")
-cat("Best enhanced model (", best_model_name_enhanced, ") saved to: results/best_model.rds\n")
-
-# =============================================================================
-# Enhanced Feature Importance Analysis
-# =============================================================================
-
-cat("\nEnhanced Feature Importance Analysis:\n")
-cat("=====================================\n")
-
-# For Random Forest models
-rf_models <- all_models_enhanced[grep("^RF_", names(all_models_enhanced))]
-if (length(rf_models) > 0) {
-  best_rf <- rf_models[[which.min(sapply(rf_models, function(x) x$results$RMSE[which.min(x$results$RMSE)]))]]
-  
-  imp <- varImp(best_rf)
-  importance_data <- imp$importance
-  importance_data$Variable <- rownames(importance_data)
-  importance_data <- importance_data[order(-importance_data$Overall), ]
-  
-  # Save variable importance
-  write.csv(importance_data, "results/variable_importance.csv", row.names = FALSE)
-  cat("Variable importance saved to: results/variable_importance.csv\n")
-  
-  # Plot importance
-  png("results/variable_importance_plot.png", width = 10, height = 8, units = "in", res = 300)
-  plot(imp, top = 15, main = "Top 15 Variable Importance (Enhanced RF)")
-  dev.off()
-  cat("Variable importance plot saved to: results/variable_importance_plot.png\n")
-}
-
-# For regularized models
-reg_models <- all_models_enhanced[grep("^(Ridge_|Lasso_|Elastic_)", names(all_models_enhanced))]
-if (length(reg_models) > 0) {
-  best_reg <- reg_models[[which.min(sapply(reg_models, function(x) x$results$RMSE[which.min(x$results$RMSE)]))]]
-  
-  coef_data <- coef(best_reg$finalModel, s = best_reg$bestTune$lambda)
-  coef_df <- data.frame(
-    Variable = rownames(coef_data),
-    Coefficient = as.numeric(coef_data)
-  )
-  coef_df <- coef_df[order(-abs(coef_df$Coefficient)), ]
-  
-  write.csv(coef_df, "results/coefficients.csv", row.names = FALSE)
-  cat("Model coefficients saved to: results/coefficients.csv\n")
-  
-  # Plot coefficients
-  png("results/coefficients_plot.png", width = 12, height = 8, units = "in", res = 300)
-  barplot(coef_df$Coefficient[1:15], names.arg = coef_df$Variable[1:15], 
-          main = paste("Top 15 Coefficients (", names(best_reg), ")"),
-          las = 2, cex.names = 0.8)
-  dev.off()
-  cat("Coefficients plot saved to: results/coefficients_plot.png\n")
-}
-
-# =============================================================================
-# Save Enhanced Model Information
-# =============================================================================
-
+# Save model information
 model_info_file <- "results/model_info.txt"
 sink(model_info_file)
-cat("Enhanced Model Training Information\n")
-cat("==================================\n")
+cat("Simplified Model Training Information\n")
+cat("====================================\n")
 cat("Training date:", Sys.Date(), "\n")
-cat("Best model:", best_model_name_enhanced, "\n")
-cat("Training samples:", nrow(train_selected_medium), "\n")
-cat("Feature sets tested:\n")
-cat("- High threshold (>0.15):", ncol(train_selected_high)-1, "features\n")
-cat("- Medium threshold (>0.1):", ncol(train_selected_medium)-1, "features\n")
-cat("- Low threshold (>0.05):", ncol(train_selected_low)-1, "features\n")
-cat("Best models by feature set:\n")
-cat("- High features:", best_high, "\n")
-cat("- Medium features:", best_medium, "\n")
-cat("- Low features:", best_low, "\n")
-cat("\nEnhanced Model Comparison Summary:\n")
-print(summary_enhanced)
+cat("Model type: Random Forest\n")
+cat("Training samples:", nrow(train_selected), "\n")
+cat("Selected features:", ncol(train_selected) - 1, "\n")
+cat("Correlation threshold:", cor_threshold, "\n")
+cat("Best RMSE:", round(best_rmse, 2), "\n")
+cat("Best R²:", round(best_r2, 3), "\n")
+cat("Best MAE:", round(best_mae, 2), "\n")
+cat("\nModel Parameters:\n")
+cat("Number of trees:", rf_model$finalModel$ntree, "\n")
+cat("mtry:", rf_model$finalModel$mtry, "\n")
+cat("Cross-validation folds:", 5, "\n")
 sink()
-cat("Enhanced model information saved to:", model_info_file, "\n")
+cat("Model information saved to:", model_info_file, "\n")
 
 # =============================================================================
-# Enhanced Training Summary
+# Training Summary
 # =============================================================================
 
 cat("\n", paste(rep("=", 50), collapse = ""), "\n")
-cat("ENHANCED MODEL TRAINING COMPLETE\n")
+cat("SIMPLIFIED MODEL TRAINING COMPLETE\n")
 cat(paste(rep("=", 50), collapse = ""), "\n")
-cat("Best model:", best_model_name_enhanced, "\n")
-cat("CV RMSE:", round(min(summary_enhanced$statistics$RMSE[,"Mean"]), 2), "\n")
-cat("CV R²:", round(max(summary_enhanced$statistics$Rsquared[,"Mean"]), 3), "\n")
-cat("Number of successful models:", length(all_models_enhanced), "\n")
-cat("\nEnhancements made:\n")
-cat("- Multiple feature selection thresholds\n")
-cat("- Enhanced outlier handling\n")
-cat("- Interaction feature creation\n")
-cat("- Advanced model tuning\n")
-cat("- Robust error handling\n")
+cat("Model: Random Forest\n")
+cat("CV RMSE:", round(best_rmse, 2), "\n")
+cat("CV R²:", round(best_r2, 3), "\n")
+cat("Selected features:", ncol(train_selected) - 1, "\n")
+cat("Positive importance variables:", nrow(positive_importance), "\n")
+cat("Negative importance variables:", nrow(negative_importance), "\n")
 cat("\nFiles generated in 'results' directory:\n")
-cat("- models.rds (all enhanced models)\n")
-cat("- best_model.rds (best performing model)\n")
-cat("- preprocessing_params.rds (preprocessing parameters)\n")
+cat("- best_model.rds (trained Random Forest model)\n")
 cat("- model_info.txt (training information)\n")
-cat("- variable_importance.csv (feature importance)\n")
+cat("- variable_importance.csv (all feature importance)\n")
+cat("- positive_importance.csv (positive importance features)\n")
+cat("- negative_importance.csv (negative importance features)\n")
 cat("- variable_importance_plot.png (importance plot)\n")
-cat("- coefficients.csv (model coefficients)\n")
-cat("- coefficients_plot.png (coefficients plot)\n")
 cat("- selected_features.csv (selected features)\n")
-cat("\nEnhanced models are ready for prediction using the prediction script.\n") 
+cat("\nModel is ready for prediction using the prediction script.\n") 
