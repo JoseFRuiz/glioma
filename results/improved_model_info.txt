@@ -1,0 +1,47 @@
+Improved Model Training Information
+==================================
+Training date: 20267 
+Best model: Elastic_Improved 
+Training samples: 84 
+Number of features: 18 
+Feature selection threshold: 0.1 
+Selected features: Basophils, CD4_naive_Tcells, CMP, Eosinophils, HSC, MPP, MSC, Macrophages, Macrophages_M1, Macrophages_M2, Mast_cells, Myocytes, NKT, Neurons, Neutrophils, Osteoblast, Plasma_cells, Platelets, Th2_cells, ly_Endothelial_cells, mv_Endothelial_cells, naive_Bcells, ImmuneScore 
+
+Model Comparison Summary:
+
+Call:
+summary.resamples(object = model_comparison_improved)
+
+Models: RF_Improved, Ridge_Improved, Lasso_Improved, Elastic_Improved, SVR_Improved 
+Number of resamples: 5 
+
+MAE 
+                     Min.  1st Qu.   Median     Mean  3rd Qu.     Max. NA's
+RF_Improved      166.0239 190.7497 225.4465 208.0124 226.4774 231.3643    0
+Ridge_Improved   210.2785 211.0277 211.3225 220.8487 233.6690 237.9460    0
+Lasso_Improved   190.5244 194.8884 195.3253 204.1437 196.8183 243.1622    0
+Elastic_Improved 151.5485 190.5331 192.6223 208.5250 211.1952 296.7259    0
+SVR_Improved     149.9222 195.0888 213.4214 199.7353 215.2366 225.0074    0
+
+RMSE 
+                     Min.  1st Qu.   Median     Mean  3rd Qu.     Max. NA's
+RF_Improved      231.6716 232.6902 267.8685 259.1295 273.5665 289.8506    0
+Ridge_Improved   265.3185 269.4163 276.5500 275.0884 281.0632 283.0941    0
+Lasso_Improved   233.5174 238.2426 269.0479 261.2314 275.7807 289.5683    0
+Elastic_Improved 180.4413 224.1683 248.0937 250.5073 270.4432 329.3900    0
+SVR_Improved     189.5572 260.1570 266.4615 251.1861 268.4971 271.2575    0
+
+Rsquared 
+                         Min.     1st Qu.     Median       Mean    3rd Qu.
+RF_Improved      2.366241e-02 0.033373323 0.03671723 0.06994581 0.06538301
+Ridge_Improved   1.237633e-02 0.060683179 0.08185945 0.09469021 0.11372514
+Lasso_Improved   9.911306e-05 0.009334817 0.02230438 0.05944098 0.08264717
+Elastic_Improved 1.123832e-02 0.021270873 0.12595313 0.17958866 0.19374993
+SVR_Improved     4.030415e-03 0.064209820 0.08744505 0.09250619 0.15003600
+                      Max. NA's
+RF_Improved      0.1905931    0
+Ridge_Improved   0.2048069    0
+Lasso_Improved   0.1828194    0
+Elastic_Improved 0.5457311    0
+SVR_Improved     0.1568097    0
+

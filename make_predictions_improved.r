@@ -1,10 +1,8 @@
 # =============================================================================
-# Glioma Survival Prediction - Regularized Model Prediction Script
+# Glioma Survival Prediction - Improved Model Prediction Script
 # =============================================================================
 
 # Required packages
-# install.packages(c("caret", "randomForest", "ggplot2", "dplyr", "glmnet", "e1071"), dependencies = TRUE)
-
 library(caret)
 library(randomForest)
 library(ggplot2)
@@ -13,38 +11,38 @@ library(glmnet)
 library(e1071)
 
 # =============================================================================
-# Load Models and Data
+# Load Improved Models and Data
 # =============================================================================
 
-# Load the best regularized model
-best_model_file <- "results/best_regularized_model.rds"
+# Load the best improved model
+best_model_file <- "results/best_improved_model.rds"
 
 if (!file.exists(best_model_file)) {
-  stop("Best regularized model not found at: ", best_model_file)
+  stop("Best improved model not found at: ", best_model_file)
 }
 
 best_model <- readRDS(best_model_file)
-cat("Loaded best regularized model from:", best_model_file, "\n")
+cat("Loaded best improved model from:", best_model_file, "\n")
 
-# Load all models for comparison
-all_models_file <- "results/all_regularized_models.rds"
+# Load all improved models for comparison
+all_models_file <- "results/improved_models.rds"
 
 if (!file.exists(all_models_file)) {
-  stop("All regularized models not found at: ", all_models_file)
+  stop("All improved models not found at: ", all_models_file)
 }
 
 all_models <- readRDS(all_models_file)
-cat("Loaded all regularized models from:", all_models_file, "\n")
+cat("Loaded all improved models from:", all_models_file, "\n")
 
-# Load preprocessing parameters
-preprocess_file <- "results/preprocessing_params.rds"
+# Load improved preprocessing parameters
+preprocess_file <- "results/improved_preprocessing_params.rds"
 
 if (!file.exists(preprocess_file)) {
-  stop("Preprocessing parameters not found at: ", preprocess_file)
+  stop("Improved preprocessing parameters not found at: ", preprocess_file)
 }
 
 preprocess_params <- readRDS(preprocess_file)
-cat("Loaded preprocessing parameters from:", preprocess_file, "\n")
+cat("Loaded improved preprocessing parameters from:", preprocess_file, "\n")
 
 # Load training data
 train_file <- "results/train_data.csv"
@@ -77,54 +75,81 @@ if (!"days_to_death.demographic" %in% names(test_data)) {
 cat("Loaded test data with", nrow(test_data), "samples and", ncol(test_data)-1, "features\n")
 
 # =============================================================================
-# Data Preprocessing
+# Apply Same Preprocessing as Training
 # =============================================================================
 
-# Remove zero-variance features from training data (same as during training)
-nzv_train <- nearZeroVar(train_data, saveMetrics = TRUE)
-if (any(nzv_train$zeroVar)) {
-  train_data <- train_data[, !names(train_data) %in% rownames(nzv_train[nzv_train$zeroVar, ])]
-  cat("Removed", sum(nzv_train$zeroVar), "zero-variance features from training data\n")
+set.seed(123)
+
+# Apply winsorization to target variables (same as training)
+q1 <- quantile(train_data$days_to_death.demographic, 0.05)
+q99 <- quantile(train_data$days_to_death.demographic, 0.95)
+
+train_data$days_to_death.demographic <- pmin(pmax(train_data$days_to_death.demographic, q1), q99)
+test_data$days_to_death.demographic <- pmin(pmax(test_data$days_to_death.demographic, q1), q99)
+
+cat("Applied winsorization to target variables\n")
+
+# Remove zero-variance features
+nzv <- nearZeroVar(train_data, saveMetrics = TRUE)
+if (any(nzv$zeroVar)) {
+  train_data <- train_data[, !names(train_data) %in% rownames(nzv[nzv$zeroVar, ])]
+  test_data <- test_data[, !names(test_data) %in% rownames(nzv[nzv$zeroVar, ])]
+  cat("Removed", sum(nzv$zeroVar), "zero-variance features\n")
 }
 
-# Remove zero-variance features from test data
-nzv_test <- nearZeroVar(test_data, saveMetrics = TRUE)
-if (any(nzv_test$zeroVar)) {
-  test_data <- test_data[, !names(test_data) %in% rownames(nzv_test[nzv_test$zeroVar, ])]
-  cat("Removed", sum(nzv_test$zeroVar), "zero-variance features from test data\n")
+# Feature selection (same as training)
+features <- train_data[, -1]
+target <- train_data$days_to_death.demographic
+feature_cors <- sapply(features, function(x) cor(x, target, use = "complete.obs"))
+feature_cors_abs <- abs(feature_cors)
+
+# Select features with meaningful correlations
+cor_threshold <- 0.1
+selected_features <- names(feature_cors_abs[feature_cors_abs > cor_threshold])
+
+if (length(selected_features) < 5) {
+  # If too few features, use top 10 by correlation
+  top_features <- names(sort(feature_cors_abs, decreasing = TRUE)[1:10])
+  selected_features <- top_features
 }
+
+# Create feature-engineered datasets
+train_selected <- train_data[, c("days_to_death.demographic", selected_features)]
+test_selected <- test_data[, c("days_to_death.demographic", selected_features)]
 
 # Ensure test data has same features as training data
-missing_features <- setdiff(names(train_data), names(test_data))
+missing_features <- setdiff(names(train_selected), names(test_selected))
 if (length(missing_features) > 0) {
   cat("Warning: Test data missing features:", paste(missing_features, collapse = ", "), "\n")
   for (feature in missing_features) {
-    test_data[[feature]] <- NA
+    test_selected[[feature]] <- NA
   }
 }
 
 # Reorder test data columns to match training data
-test_data <- test_data[, names(train_data)]
+test_selected <- test_selected[, names(train_selected)]
 
-# Apply preprocessing to both datasets
-train_data_scaled <- predict(preprocess_params, train_data)
-test_data_scaled <- predict(preprocess_params, test_data)
+cat("Selected", length(selected_features), "features for prediction\n")
+
+# Apply scaling for models that need it
+train_scaled <- predict(preprocess_params, train_selected)
+test_scaled <- predict(preprocess_params, test_selected)
 
 # =============================================================================
-# Make Predictions with All Models
+# Make Predictions with All Improved Models
 # =============================================================================
 
-cat("\nMaking predictions with all models...\n")
+cat("\nMaking predictions with all improved models...\n")
 
 # Function to make predictions based on model type
-make_predictions <- function(model, data, data_scaled) {
+make_predictions_improved <- function(model, data, data_scaled) {
   model_name <- names(which(sapply(all_models, function(x) identical(x, model))))
   
-  if (model_name %in% c("RF_Simple", "RF_Regularized")) {
-    # Random Forest models use unscaled data
+  if (model_name == "RF_Improved") {
+    # Random Forest uses unscaled data
     return(predict(model, newdata = data))
   } else {
-    # Linear models (Ridge, Lasso, Elastic Net) use scaled data
+    # Other models (Ridge, Lasso, Elastic Net, SVR) use scaled data
     return(predict(model, newdata = data_scaled))
   }
 }
@@ -135,10 +160,10 @@ for (model_name in names(all_models)) {
   model <- all_models[[model_name]]
   
   # Training predictions
-  train_pred <- make_predictions(model, train_data, train_data_scaled)
+  train_pred <- make_predictions_improved(model, train_selected, train_scaled)
   
   # Test predictions
-  test_pred <- make_predictions(model, test_data, test_data_scaled)
+  test_pred <- make_predictions_improved(model, test_selected, test_scaled)
   
   predictions[[model_name]] <- list(
     train_pred = train_pred,
@@ -150,8 +175,8 @@ for (model_name in names(all_models)) {
 # Calculate Performance Metrics for All Models
 # =============================================================================
 
-train_actual <- train_data$days_to_death.demographic
-test_actual <- test_data$days_to_death.demographic
+train_actual <- train_selected$days_to_death.demographic
+test_actual <- test_selected$days_to_death.demographic
 
 performance_summary <- data.frame()
 
@@ -188,8 +213,8 @@ for (model_name in names(predictions)) {
 # Sort by test R² (best generalization)
 performance_summary <- performance_summary[order(-performance_summary$Test_R2), ]
 
-cat("\nModel Performance Summary:\n")
-cat("==========================\n")
+cat("\nImproved Model Performance Summary:\n")
+cat("===================================\n")
 print(performance_summary)
 
 # =============================================================================
@@ -210,7 +235,7 @@ train_scatter_plot <- ggplot(data.frame(Actual = train_actual, Predicted = best_
                             aes(x = Actual, y = Predicted)) +
   geom_point(color = "steelblue", alpha = 0.7) +
   geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "red") +
-  labs(title = paste("Regularized Model:", best_model_name, "- Training Set"),
+  labs(title = paste("Improved Model:", best_model_name, "- Training Set"),
        x = "Actual Days to Death",
        y = "Predicted Days to Death") +
   annotate("text", x = min(train_actual), y = max(best_predictions$train_pred), hjust = 0,
@@ -225,7 +250,7 @@ test_scatter_plot <- ggplot(data.frame(Actual = test_actual, Predicted = best_pr
                            aes(x = Actual, y = Predicted)) +
   geom_point(color = "darkgreen", alpha = 0.7) +
   geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "red") +
-  labs(title = paste("Regularized Model:", best_model_name, "- Test Set"),
+  labs(title = paste("Improved Model:", best_model_name, "- Test Set"),
        x = "Actual Days to Death",
        y = "Predicted Days to Death") +
   annotate("text", x = min(test_actual), y = max(best_predictions$test_pred), hjust = 0,
@@ -240,18 +265,18 @@ print(train_scatter_plot)
 print(test_scatter_plot)
 
 # Save the plots
-ggsave("results/regularized_training_scatter_plot.png", plot = train_scatter_plot, 
+ggsave("results/improved_training_scatter_plot.png", plot = train_scatter_plot, 
        width = 10, height = 8, dpi = 300, bg = "white")
-cat("Regularized training scatter plot saved to: results/regularized_training_scatter_plot.png\n")
+cat("Improved training scatter plot saved to: results/improved_training_scatter_plot.png\n")
 
-ggsave("results/regularized_test_scatter_plot.png", plot = test_scatter_plot, 
+ggsave("results/improved_test_scatter_plot.png", plot = test_scatter_plot, 
        width = 10, height = 8, dpi = 300, bg = "white")
-cat("Regularized test scatter plot saved to: results/regularized_test_scatter_plot.png\n")
+cat("Improved test scatter plot saved to: results/improved_test_scatter_plot.png\n")
 
 # Also save as PDF
-ggsave("results/regularized_training_scatter_plot.pdf", plot = train_scatter_plot, 
+ggsave("results/improved_training_scatter_plot.pdf", plot = train_scatter_plot, 
        width = 10, height = 8, bg = "white")
-ggsave("results/regularized_test_scatter_plot.pdf", plot = test_scatter_plot, 
+ggsave("results/improved_test_scatter_plot.pdf", plot = test_scatter_plot, 
        width = 10, height = 8, bg = "white")
 
 # =============================================================================
@@ -259,9 +284,9 @@ ggsave("results/regularized_test_scatter_plot.pdf", plot = test_scatter_plot,
 # =============================================================================
 
 # Save performance summary
-performance_file <- "results/regularized_performance_summary.csv"
+performance_file <- "results/improved_performance_summary.csv"
 write.csv(performance_summary, performance_file, row.names = FALSE)
-cat("Performance summary saved to:", performance_file, "\n")
+cat("Improved performance summary saved to:", performance_file, "\n")
 
 # Save best model predictions
 best_predictions_data <- data.frame(
@@ -271,24 +296,38 @@ best_predictions_data <- data.frame(
   Residuals = c(train_actual - best_predictions$train_pred, test_actual - best_predictions$test_pred)
 )
 
-best_predictions_file <- "results/regularized_best_predictions.csv"
+best_predictions_file <- "results/improved_best_predictions.csv"
 write.csv(best_predictions_data, best_predictions_file, row.names = FALSE)
-cat("Best model predictions saved to:", best_predictions_file, "\n")
+cat("Best improved model predictions saved to:", best_predictions_file, "\n")
+
+# Save feature information
+feature_info <- data.frame(
+  Feature = selected_features,
+  Correlation = feature_cors[selected_features],
+  Abs_Correlation = feature_cors_abs[selected_features]
+)
+feature_info <- feature_info[order(-feature_info$Abs_Correlation), ]
+
+feature_file <- "results/improved_selected_features.csv"
+write.csv(feature_info, feature_file, row.names = FALSE)
+cat("Selected features information saved to:", feature_file, "\n")
 
 # =============================================================================
 # Summary
 # =============================================================================
 
 cat("\n", paste(rep("=", 50), collapse = ""), "\n")
-cat("REGULARIZED PREDICTION COMPLETE\n")
+cat("IMPROVED PREDICTION COMPLETE\n")
 cat(paste(rep("=", 50), collapse = ""), "\n")
 cat("Best model:", best_model_name, "\n")
 cat("Test R²:", round(performance_summary$Test_R2[1], 3), "\n")
 cat("Test RMSE:", round(performance_summary$Test_RMSE[1], 1), "days\n")
 cat("Overfitting score:", round(performance_summary$Overfitting_Score[1], 3), "\n")
+cat("Number of selected features:", length(selected_features), "\n")
 cat("\nFiles generated in 'results' directory:\n")
-cat("- regularized_performance_summary.csv (all models performance)\n")
-cat("- regularized_best_predictions.csv (best model predictions)\n")
-cat("- regularized_training_scatter_plot.png/pdf\n")
-cat("- regularized_test_scatter_plot.png/pdf\n")
-cat("\nRegularized prediction analysis complete.\n") 
+cat("- improved_performance_summary.csv (all models performance)\n")
+cat("- improved_best_predictions.csv (best model predictions)\n")
+cat("- improved_selected_features.csv (selected features info)\n")
+cat("- improved_training_scatter_plot.png/pdf\n")
+cat("- improved_test_scatter_plot.png/pdf\n")
+cat("\nImproved prediction analysis complete.\n") 

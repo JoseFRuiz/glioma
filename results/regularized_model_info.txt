@@ -1,0 +1,45 @@
+Regularized Model Training Information
+=====================================
+Training date: 20267 
+Best model: RF_Regularized 
+Training samples: 84 
+Number of features: 67 
+
+Model Comparison Summary:
+
+Call:
+summary.resamples(object = model_comparison)
+
+Models: RF_Simple, RF_Regularized, Ridge, Lasso, Elastic_Net 
+Number of resamples: 5 
+
+MAE 
+                    Min.   1st Qu.    Median      Mean   3rd Qu.      Max. NA's
+RF_Simple       205.4041  206.4955  234.1482  228.6096  245.4511  251.5491    0
+RF_Regularized  192.5699  207.9764  227.4231  226.5951  231.8014  273.2047    0
+Ridge           320.7154  321.3860  366.3758  368.1692  391.4854  440.8835    0
+Lasso          1272.0766 1928.2794 2299.0513 3078.7682 3352.3415 6542.0923    0
+Elastic_Net     191.0055  194.7661  247.5427  233.8316  265.9731  269.8708    0
+
+RMSE 
+                    Min.   1st Qu.    Median      Mean   3rd Qu.      Max. NA's
+RF_Simple       254.5781  274.9518  298.1466  303.4393  338.1212  351.3989    0
+RF_Regularized  257.9710  263.0806  264.2362  295.9445  320.3856  374.0491    0
+Ridge           419.3811  434.8673  439.0458  474.1050  535.7537  541.4772    0
+Lasso          1638.3330 2329.7824 2736.3499 3847.1785 4186.0789 8345.3482    0
+Elastic_Net     226.4520  241.2214  324.2917  301.4696  330.3492  385.0338    0
+
+Rsquared 
+                       Min.     1st Qu.      Median       Mean    3rd Qu.
+RF_Simple      0.0005824217 0.001117983 0.016067568 0.07093549 0.15453788
+RF_Regularized 0.0002199937 0.000458341 0.003265023 0.06456971 0.02226551
+Ridge          0.0018730503 0.004374072 0.012756874 0.03940327 0.01492083
+Lasso          0.0013149098 0.003564963 0.005906269 0.05562559 0.08824616
+Elastic_Net    0.0501704165 0.085965644 0.137166962 0.13004057 0.18528941
+                    Max. NA's
+RF_Simple      0.1823716    0
+RF_Regularized 0.2966397    0
+Ridge          0.1630915    0
+Lasso          0.1790957    0
+Elastic_Net    0.1916104    0
+
